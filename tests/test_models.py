@@ -1,7 +1,10 @@
 """Tests for data models."""
 
 import pytest
-from app.models import CodeChunk, ChunkMetadata, SearchResult, QueryRequest, QueryResponse
+from app.models import (
+    CodeChunk, ChunkMetadata, SearchResult, QueryRequest, QueryResponse,
+    ChatRequest, ChatResponse, ToolCall,
+)
 
 
 class TestChunkMetadata:
@@ -56,3 +59,39 @@ class TestQueryResponse:
     def test_with_query_type(self):
         resp = QueryResponse(answer="docs", sources=[], query_type="document", query_time_ms=50.0)
         assert resp.query_type == "document"
+
+
+class TestChatRequest:
+    def test_query_only(self):
+        req = ChatRequest(query="What does DGEMM do?")
+        assert req.query == "What does DGEMM do?"
+        assert req.session_id is None
+
+    def test_with_session_id(self):
+        req = ChatRequest(query="Follow up", session_id="abc-123")
+        assert req.session_id == "abc-123"
+
+
+class TestToolCall:
+    def test_creation(self):
+        tc = ToolCall(
+            tool_name="search_codebase",
+            tool_input={"query": "DGEMM"},
+            tool_result={"results": []},
+        )
+        assert tc.tool_name == "search_codebase"
+        assert tc.tool_input["query"] == "DGEMM"
+
+
+class TestChatResponse:
+    def test_creation(self):
+        resp = ChatResponse(
+            answer="test",
+            sources=[],
+            tool_calls=[],
+            session_id="abc-123",
+            query_time_ms=100.0,
+        )
+        assert resp.answer == "test"
+        assert resp.session_id == "abc-123"
+        assert resp.tool_calls == []

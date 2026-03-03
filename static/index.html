@@ -509,6 +509,73 @@
 
         .error-msg::before { content: 'ERROR: '; }
 
+        /* === Conversation History === */
+        .user-msg {
+            color: var(--green-bright);
+            font-size: 18px;
+            padding: 8px 0;
+            margin-top: 12px;
+            text-shadow: 0 0 8px var(--green-glow);
+        }
+
+        .prompt-echo {
+            color: var(--amber);
+            margin-right: 4px;
+        }
+
+        .turn-divider {
+            color: var(--green-muted);
+            text-align: center;
+            margin: 16px 0 8px;
+            font-size: 14px;
+            opacity: 0.5;
+        }
+
+        /* === Tool Calls === */
+        .tool-calls-section {
+            border: 1px solid var(--green-muted);
+            padding: 10px 12px;
+            margin: 8px 0;
+            font-size: 14px;
+            background: var(--bg-code);
+        }
+
+        .tool-call {
+            padding: 3px 0;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .tool-name {
+            color: var(--cyan);
+            font-weight: bold;
+        }
+
+        .tool-args {
+            color: var(--green-dim);
+            font-size: 13px;
+        }
+
+        /* === [NEW] Button === */
+        #newBtn {
+            padding: 8px 12px;
+            background: transparent;
+            border: 1px solid var(--amber);
+            color: var(--amber);
+            font-family: var(--font);
+            font-size: 16px;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: all 0.15s;
+        }
+
+        #newBtn:hover {
+            background: var(--amber);
+            color: var(--bg);
+        }
+
         /* === Animations === */
         @keyframes fadeIn {
             from { opacity: 0; }
@@ -582,6 +649,7 @@
                     aria-label="Search the BLAS codebase"
                 />
                 <button id="btn" aria-label="Search">[EXEC]</button>
+                <button id="newBtn" aria-label="New Session" onclick="newSession()" title="Start new conversation">[NEW]</button>
             </div>
             <div class="search-hints">
                 <span class="hint" onclick="fillQuery('What does DGEMM do?')">&gt; What does DGEMM do?</span>
@@ -613,6 +681,8 @@
         const input = document.getElementById('query');
         const btn = document.getElementById('btn');
         const results = document.getElementById('results');
+        var sessionId = null;
+        var sourceCounter = 0;
 
         input.addEventListener('keydown', function(e) { if (e.key === 'Enter') search(); });
 
@@ -622,17 +692,40 @@
             search();
         }
 
+        function newSession() {
+            sessionId = null;
+            sourceCounter = 0;
+            results.textContent = '';
+            var emptyDiv = document.createElement('div');
+            emptyDiv.className = 'empty-state';
+            emptyDiv.innerHTML = '<div class="empty-ascii">   ___________\n  |  _______ |\n  | |       ||\n  | | READY ||\n  | |_______||t\n  |___________|\n  /           /\n /___________/</div><p>NEW SESSION &mdash; Awaiting query...</p>';
+            results.appendChild(emptyDiv);
+            input.value = '';
+            input.focus();
+        }
+
         async function search() {
             const query = input.value.trim();
             if (!query) return;
             btn.disabled = true;
+            input.value = '';
 
-            results.textContent = '';
+            // Remove empty state if present
+            var emptyState = results.querySelector('.empty-state');
+            if (emptyState) emptyState.remove();
+
+            // Show user query
+            var userDiv = document.createElement('div');
+            userDiv.className = 'user-msg';
+            userDiv.innerHTML = '<span class="prompt-echo">$&gt;</span> ' + esc(query);
+            results.appendChild(userDiv);
+
+            // Show loading
             var loadDiv = document.createElement('div');
             loadDiv.className = 'loading-container';
-            loadDiv.appendChild(makeLine('QUERY RECEIVED: "' + esc(query) + '"'));
-            loadDiv.appendChild(makeLine('EMBEDDING QUERY VIA text-embedding-3-small...'));
-            loadDiv.appendChild(makeLine('SEARCHING PINECONE INDEX [legacylens]...'));
+            loadDiv.id = 'current-loading';
+            loadDiv.appendChild(makeLine('ROUTING QUERY TO AGENT...'));
+            loadDiv.appendChild(makeLine('AGENT SELECTING TOOLS...'));
             var lastLine = makeLine('GENERATING RESPONSE VIA CLAUDE...');
             var cur = document.createElement('span');
             cur.className = 'cursor';
@@ -643,24 +736,49 @@
             barLine.textContent = '[##########..........] PROCESSING';
             loadDiv.appendChild(barLine);
             results.appendChild(loadDiv);
+            results.scrollTop = results.scrollHeight;
 
             try {
-                var res = await fetch('/api/query', {
+                var body = { query: query };
+                if (sessionId) body.session_id = sessionId;
+
+                var res = await fetch('/api/chat', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ query: query })
+                    body: JSON.stringify(body)
                 });
 
                 if (!res.ok) throw new Error('Server error (' + res.status + ')');
                 var data = await res.json();
 
-                results.textContent = '';
+                // Update session
+                sessionId = data.session_id;
+
+                // Remove loading
+                var loader = document.getElementById('current-loading');
+                if (loader) loader.remove();
+
+                // Tool calls section
+                if (data.tool_calls && data.tool_calls.length > 0) {
+                    var toolDiv = document.createElement('div');
+                    toolDiv.className = 'tool-calls-section';
+                    var toolHeader = '<div class="terminal-label" style="margin-bottom:6px">&gt; TOOL CALLS EXECUTED:</div>';
+                    var toolItems = '';
+                    data.tool_calls.forEach(function(tc) {
+                        var args = Object.entries(tc.tool_input).map(function(e) { return e[0] + '="' + e[1] + '"'; }).join(', ');
+                        var hasError = tc.tool_result && tc.tool_result.error;
+                        var statusClass = hasError ? 'score-low' : 'score-high';
+                        var statusText = hasError ? 'ERR' : 'OK';
+                        toolItems += '<div class="tool-call"><span class="tool-name">[' + esc(tc.tool_name) + ']</span> <span class="tool-args">' + esc(args) + '</span> <span class="score-badge ' + statusClass + '">' + statusText + '</span></div>';
+                    });
+                    toolDiv.innerHTML = toolHeader + toolItems;
+                    results.appendChild(toolDiv);
+                }
 
                 // Meta bar
-                var typeLabel = (data.query_type || 'explain').toUpperCase();
                 var metaBar = document.createElement('div');
                 metaBar.className = 'meta-bar';
-                metaBar.innerHTML = 'QUERY COMPLETE &mdash; TIME: <span class="stat">' + data.query_time_ms.toFixed(0) + 'ms</span> &mdash; SOURCES: <span class="stat">' + data.sources.length + '</span> &mdash; MODE: <span class="stat">' + typeLabel + '</span>';
+                metaBar.innerHTML = 'QUERY COMPLETE &mdash; TIME: <span class="stat">' + data.query_time_ms.toFixed(0) + 'ms</span> &mdash; SOURCES: <span class="stat">' + data.sources.length + '</span> &mdash; TOOLS: <span class="stat">' + (data.tool_calls ? data.tool_calls.length : 0) + '</span>';
                 results.appendChild(metaBar);
 
                 // Answer
@@ -684,7 +802,7 @@
                         var scoreClass = pct >= 45 ? 'score-high' : pct >= 35 ? 'score-mid' : 'score-low';
                         var codeText = s.chunk.text;
                         var isLong = codeText.length > 800;
-                        var id = 'source-' + i;
+                        var id = 'source-' + (sourceCounter++);
 
                         var card = document.createElement('div');
                         card.className = 'source';
@@ -711,20 +829,25 @@
                         card.innerHTML = headerHtml + codeHtml + actionsHtml;
                         results.appendChild(card);
                     });
-                } else {
-                    var emptyDiv = document.createElement('div');
-                    emptyDiv.className = 'empty-state';
-                    emptyDiv.textContent = 'NO MATCHES FOUND. REFINE QUERY AND RETRY.';
-                    results.appendChild(emptyDiv);
                 }
+
+                // Divider between turns
+                var turnDiv = document.createElement('div');
+                turnDiv.className = 'turn-divider';
+                turnDiv.textContent = '────────────────────────────────────────────';
+                results.appendChild(turnDiv);
+
             } catch (err) {
-                results.textContent = '';
+                var loader = document.getElementById('current-loading');
+                if (loader) loader.remove();
                 var errDiv = document.createElement('div');
                 errDiv.className = 'error-msg';
-                errDiv.textContent = err.message;
+                errDiv.textContent = 'ERROR: ' + err.message;
                 results.appendChild(errDiv);
             }
             btn.disabled = false;
+            input.focus();
+            results.scrollTop = results.scrollHeight;
         }
 
         function makeLine(text) {

@@ -32,3 +32,22 @@ class QueryResponse(BaseModel):
     sources: list[SearchResult]
     query_type: str = "explain"
     query_time_ms: float
+
+
+class ChatRequest(BaseModel):
+    query: str
+    session_id: str | None = None
+
+
+class ToolCall(BaseModel):
+    tool_name: str
+    tool_input: dict
+    tool_result: dict
+
+
+class ChatResponse(BaseModel):
+    answer: str
+    sources: list[SearchResult]
+    tool_calls: list[ToolCall]
+    session_id: str
+    query_time_ms: float
