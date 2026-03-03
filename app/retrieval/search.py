@@ -42,14 +42,34 @@ def search_codebase(query: str, top_k: int = 5, threshold: float = 0.2) -> tuple
     return results, elapsed_ms
 
 
-def build_context(results: list[SearchResult]) -> str:
-    """Assemble retrieved chunks into a context string for the LLM."""
+def build_context(results: list[SearchResult], max_chars: int = 30000) -> str:
+    """Assemble retrieved chunks into a context string for the LLM.
+
+    Args:
+        results: Retrieved search results.
+        max_chars: Maximum character limit for the context string.
+                   Prevents exceeding model context windows and reduces latency.
+                   The first source is always included even if it exceeds the limit.
+    """
+    separator = "\n\n---\n\n"
     parts = []
+    total_len = 0
+
     for i, r in enumerate(results, 1):
         m = r.chunk.metadata
         header = f"[Source {i}] {m.file_path}:{m.start_line}-{m.end_line}"
         if m.subroutine_name:
             header += f" | {m.subroutine_name}"
         header += f" (score: {r.score:.3f})"
-        parts.append(f"{header}\n{r.chunk.text}")
-    return "\n\n---\n\n".join(parts)
+        part = f"{header}\n{r.chunk.text}"
+
+        # Always include the first source; after that, check the limit
+        if i > 1:
+            added_len = len(separator) + len(part)
+            if total_len + added_len > max_chars:
+                break
+
+        parts.append(part)
+        total_len = len(separator.join(parts))
+
+    return separator.join(parts)

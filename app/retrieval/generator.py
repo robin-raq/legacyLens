@@ -4,7 +4,7 @@ import anthropic
 from app.config import settings
 from app.retrieval.query_classifier import QueryType, get_search_params
 
-_client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+_client = anthropic.Anthropic(api_key=settings.anthropic_api_key, timeout=60.0)
 
 # User message templates per feature
 _USER_TEMPLATES = {

@@ -1,3 +1,4 @@
+import asyncio
 import time
 from fastapi import APIRouter
 from app.models import QueryRequest, QueryResponse
@@ -17,20 +18,22 @@ async def health():
 async def query(request: QueryRequest):
     start = time.time()
 
-    # Classify the query intent → picks the right feature
+    # Classify the query intent (CPU-only, fast — no thread needed)
     query_type = classify_query(request.query)
     search_params = get_search_params(query_type)
 
-    # Search with feature-specific top_k
-    results, search_time_ms = search_codebase(
-        request.query, top_k=search_params["top_k"]
+    # Run blocking I/O in thread pool to avoid blocking the event loop
+    results, search_time_ms = await asyncio.to_thread(
+        search_codebase, request.query, search_params["top_k"]
     )
 
-    # Build context and generate answer with feature-specific prompt
+    # Build context and generate answer (also blocking I/O)
     answer = ""
     if results:
         context = build_context(results)
-        answer = generate_answer(request.query, context, query_type)
+        answer = await asyncio.to_thread(
+            generate_answer, request.query, context, query_type
+        )
 
     total_ms = (time.time() - start) * 1000
 
