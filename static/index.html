@@ -6,216 +6,252 @@
     <title>LegacyLens — BLAS Code Explorer</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=VT323&family=Share+Tech+Mono&display=swap" rel="stylesheet">
     <style>
-        /* === CSS Variables === */
+        /* === CRT Terminal Theme === */
         :root {
-            --bg-primary: #0b1120;
-            --bg-secondary: #131c31;
-            --bg-card: #172033;
-            --bg-code: #0d1526;
-            --border: #1e2d4a;
-            --border-hover: #2a3f6a;
-            --text-primary: #e2e8f0;
-            --text-secondary: #94a3b8;
-            --text-muted: #64748b;
-            --accent: #0ea5e9;
-            --accent-hover: #0284c7;
-            --accent-glow: rgba(14, 165, 233, 0.15);
-            --accent-subtle: rgba(14, 165, 233, 0.08);
-            --success: #34d399;
-            --warning: #fbbf24;
-            --error: #f87171;
-            --radius-sm: 8px;
-            --radius-md: 12px;
-            --radius-lg: 16px;
-            --shadow-sm: 0 1px 3px rgba(0,0,0,0.3);
-            --shadow-md: 0 4px 12px rgba(0,0,0,0.3);
-            --shadow-lg: 0 8px 32px rgba(0,0,0,0.4);
-            --font-ui: 'Outfit', system-ui, sans-serif;
-            --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
-            --transition: 0.2s ease;
+            --bg: #0a0a0a;
+            --bg-panel: #0f0f0f;
+            --bg-code: #050505;
+            --green: #33ff00;
+            --green-dim: #1a8c00;
+            --green-bright: #66ff33;
+            --green-muted: #0d4400;
+            --green-glow: rgba(51, 255, 0, 0.15);
+            --green-subtle: rgba(51, 255, 0, 0.05);
+            --amber: #ffaa00;
+            --red: #ff3333;
+            --cyan: #00ffcc;
+            --border: #1a3300;
+            --font: 'VT323', 'Courier New', monospace;
+            --font-alt: 'Share Tech Mono', 'Courier New', monospace;
         }
 
         /* === Reset & Base === */
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
         body {
-            font-family: var(--font-ui);
-            font-size: 14px;
-            line-height: 1.6;
-            background: var(--bg-primary);
-            color: var(--text-primary);
+            font-family: var(--font);
+            font-size: 18px;
+            line-height: 1.5;
+            background: var(--bg);
+            color: var(--green);
             min-height: 100vh;
+            position: relative;
+            overflow-x: hidden;
+        }
+
+        /* CRT Scanline overlay */
+        body::after {
+            content: '';
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: repeating-linear-gradient(
+                0deg,
+                transparent,
+                transparent 2px,
+                rgba(0, 0, 0, 0.15) 2px,
+                rgba(0, 0, 0, 0.15) 4px
+            );
+            pointer-events: none;
+            z-index: 9999;
+        }
+
+        /* CRT vignette */
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.4) 100%);
+            pointer-events: none;
+            z-index: 9998;
         }
 
         /* === Layout === */
         .container {
-            max-width: 980px;
+            max-width: 900px;
             margin: 0 auto;
-            padding: clamp(16px, 4vw, 40px);
+            padding: 20px clamp(16px, 4vw, 40px);
         }
 
-        /* === Hero === */
+        /* === ASCII Art Header === */
         .hero {
             text-align: center;
-            padding: clamp(32px, 6vw, 64px) 0 clamp(24px, 4vw, 48px);
+            padding: 24px 0 20px;
         }
 
-        .hero-icon {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            width: 56px;
-            height: 56px;
-            border-radius: var(--radius-md);
-            background: var(--accent-glow);
-            border: 1px solid var(--border);
-            margin-bottom: 20px;
-            font-size: 28px;
+        .ascii-art {
+            font-family: var(--font);
+            font-size: clamp(12px, 2.5vw, 18px);
+            color: var(--green);
+            text-shadow: 0 0 10px var(--green-glow), 0 0 20px rgba(51, 255, 0, 0.1);
+            white-space: pre;
+            line-height: 1.2;
+            margin-bottom: 12px;
         }
 
-        .hero h1 {
-            font-size: clamp(28px, 5vw, 40px);
-            font-weight: 700;
-            color: var(--text-primary);
-            letter-spacing: -0.5px;
-            margin-bottom: 8px;
+        .hero-sub {
+            color: var(--green-dim);
+            font-size: 16px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
         }
 
-        .hero h1 span {
-            background: linear-gradient(135deg, var(--accent), #67e8f9);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
+        .hero-divider {
+            color: var(--green-dim);
+            margin: 16px 0;
+            letter-spacing: 1px;
+            overflow: hidden;
         }
 
-        .hero p {
-            color: var(--text-secondary);
-            font-size: clamp(14px, 2vw, 16px);
-            max-width: 520px;
-            margin: 0 auto;
+        .sys-info {
+            color: var(--green-dim);
+            font-size: 16px;
+            margin-top: 8px;
         }
 
-        /* === Search Area === */
+        .sys-info span { color: var(--green); }
+
+        /* === Terminal Prompt Search === */
         .search-area {
-            background: var(--bg-secondary);
             border: 1px solid var(--border);
-            border-radius: var(--radius-lg);
-            padding: clamp(16px, 3vw, 24px);
-            box-shadow: var(--shadow-md);
-            margin-bottom: 32px;
-            transition: border-color var(--transition);
+            background: var(--bg-panel);
+            padding: 16px;
+            margin-bottom: 24px;
         }
 
-        .search-area:focus-within {
-            border-color: var(--accent);
-            box-shadow: var(--shadow-md), 0 0 0 3px var(--accent-glow);
+        .terminal-label {
+            color: var(--green-dim);
+            font-size: 14px;
+            margin-bottom: 8px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
         }
 
         .search-row {
             display: flex;
-            gap: 10px;
+            gap: 0;
             align-items: stretch;
+        }
+
+        .prompt-symbol {
+            display: flex;
+            align-items: center;
+            padding: 8px 12px 8px 8px;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-right: none;
+            color: var(--green);
+            font-family: var(--font);
+            font-size: 20px;
+            text-shadow: 0 0 8px var(--green-glow);
         }
 
         #query {
             flex: 1;
-            padding: 12px 16px;
+            padding: 8px 12px;
             border: 1px solid var(--border);
-            border-radius: var(--radius-sm);
-            font-family: var(--font-ui);
-            font-size: 15px;
-            background: var(--bg-primary);
-            color: var(--text-primary);
-            transition: border-color var(--transition);
+            border-right: none;
+            font-family: var(--font);
+            font-size: 18px;
+            background: var(--bg);
+            color: var(--green);
             outline: none;
+            caret-color: var(--green);
+            text-shadow: 0 0 5px var(--green-glow);
         }
 
-        #query::placeholder { color: var(--text-muted); }
-        #query:focus { border-color: var(--accent); }
+        #query::placeholder { color: var(--green-muted); }
+        #query:focus { border-color: var(--green-dim); }
 
         #btn {
-            display: inline-flex;
+            display: flex;
             align-items: center;
             gap: 6px;
-            padding: 12px 20px;
-            background: var(--accent);
-            color: white;
-            border: none;
-            border-radius: var(--radius-sm);
-            font-family: var(--font-ui);
-            font-size: 14px;
-            font-weight: 600;
+            padding: 8px 16px;
+            background: var(--green-muted);
+            color: var(--green);
+            border: 1px solid var(--green-dim);
+            font-family: var(--font);
+            font-size: 18px;
             cursor: pointer;
             white-space: nowrap;
-            transition: background var(--transition), transform var(--transition);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            transition: all 0.1s;
         }
 
-        #btn:hover { background: var(--accent-hover); transform: translateY(-1px); }
-        #btn:active { transform: translateY(0); }
-        #btn:disabled { background: #334155; cursor: not-allowed; transform: none; }
+        #btn:hover { background: var(--green-dim); color: var(--green-bright); text-shadow: 0 0 8px var(--green-glow); }
+        #btn:active { background: var(--green); color: var(--bg); }
+        #btn:disabled { background: #111; color: #333; border-color: #222; cursor: not-allowed; }
 
         .search-hints {
             display: flex;
             flex-wrap: wrap;
             gap: 6px;
-            margin-top: 12px;
+            margin-top: 10px;
         }
 
         .hint {
-            font-size: 12px;
-            color: var(--text-muted);
-            background: var(--bg-primary);
+            font-family: var(--font);
+            font-size: 16px;
+            color: var(--green-dim);
+            background: none;
             border: 1px solid var(--border);
-            border-radius: 20px;
-            padding: 4px 12px;
+            padding: 2px 10px;
             cursor: pointer;
-            transition: all var(--transition);
+            transition: all 0.1s;
         }
 
         .hint:hover {
-            color: var(--accent);
-            border-color: var(--accent);
-            background: var(--accent-subtle);
+            color: var(--green);
+            border-color: var(--green-dim);
+            background: var(--green-subtle);
+            text-shadow: 0 0 5px var(--green-glow);
+        }
+
+        /* === Blinking cursor === */
+        @keyframes blink {
+            0%, 50% { opacity: 1; }
+            51%, 100% { opacity: 0; }
+        }
+
+        .cursor {
+            display: inline-block;
+            width: 10px;
+            height: 18px;
+            background: var(--green);
+            animation: blink 1s step-end infinite;
+            vertical-align: middle;
+            margin-left: 2px;
+            box-shadow: 0 0 5px var(--green-glow);
         }
 
         /* === Loading === */
         .loading-container {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 16px;
-            padding: 48px 0;
+            padding: 32px 0;
+            color: var(--green);
         }
 
-        .spinner {
-            width: 32px;
-            height: 32px;
-            border: 3px solid var(--border);
-            border-top-color: var(--accent);
-            border-radius: 50%;
-            animation: spin 0.8s linear infinite;
+        .loading-line {
+            margin-bottom: 4px;
+            opacity: 0;
+            animation: typeIn 0.3s ease forwards;
         }
 
-        @keyframes spin { to { transform: rotate(360deg); } }
+        .loading-line:nth-child(2) { animation-delay: 0.3s; }
+        .loading-line:nth-child(3) { animation-delay: 0.6s; }
+        .loading-line:nth-child(4) { animation-delay: 0.9s; }
 
-        .loading-text {
-            color: var(--text-secondary);
-            font-size: 14px;
+        @keyframes typeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
         }
 
-        .loading-shimmer {
-            background: linear-gradient(90deg, var(--bg-card), var(--bg-secondary), var(--bg-card));
-            background-size: 200% 100%;
-            animation: shimmer 1.5s ease infinite;
-            border-radius: var(--radius-md);
-            height: 120px;
-            margin-bottom: 12px;
+        .loading-bar {
+            margin-top: 12px;
+            color: var(--green-dim);
         }
-
-        @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 
         /* === Results === */
         #results { min-height: 40px; }
@@ -224,152 +260,172 @@
         .meta-bar {
             display: flex;
             align-items: center;
-            gap: 12px;
-            margin-bottom: 20px;
-            padding-bottom: 16px;
+            gap: 16px;
+            margin-bottom: 16px;
+            padding-bottom: 8px;
             border-bottom: 1px solid var(--border);
+            color: var(--green-dim);
+            font-size: 16px;
+            flex-wrap: wrap;
         }
 
-        .badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-            font-size: 12px;
-            font-weight: 500;
-            padding: 4px 10px;
-            border-radius: 20px;
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-        }
+        .meta-bar .stat { color: var(--green); }
 
-        .badge-accent { color: var(--accent); border-color: rgba(14, 165, 233, 0.3); background: var(--accent-subtle); }
-        .badge-muted { color: var(--text-muted); }
-
-        /* === Answer === */
+        /* === Answer Panel === */
         .answer {
-            background: var(--bg-card);
             border: 1px solid var(--border);
-            border-left: 3px solid var(--accent);
-            border-radius: var(--radius-md);
-            padding: clamp(16px, 3vw, 24px);
-            margin-bottom: 24px;
-            line-height: 1.7;
-            box-shadow: var(--shadow-sm);
-            animation: fadeSlideIn 0.3s ease;
+            border-left: 2px solid var(--green-dim);
+            background: var(--bg-panel);
+            padding: 16px;
+            margin-bottom: 20px;
+            line-height: 1.6;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .answer-label {
+            color: var(--green-dim);
+            font-size: 14px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+            padding-bottom: 4px;
+            border-bottom: 1px dashed var(--border);
         }
 
         .answer h2, .answer h3 {
-            font-size: 16px;
-            font-weight: 600;
-            margin: 16px 0 8px;
-            color: var(--text-primary);
+            font-family: var(--font);
+            font-size: 20px;
+            font-weight: normal;
+            color: var(--green-bright);
+            margin: 14px 0 6px;
+            text-shadow: 0 0 8px var(--green-glow);
         }
 
-        .answer strong { color: #f1f5f9; }
+        .answer h2::before { content: '## '; color: var(--green-dim); }
+        .answer h3::before { content: '### '; color: var(--green-dim); }
+
+        .answer strong {
+            color: var(--green-bright);
+            text-shadow: 0 0 5px var(--green-glow);
+        }
+
         .answer code {
-            font-family: var(--font-mono);
-            font-size: 13px;
+            font-family: var(--font-alt);
+            font-size: 16px;
             background: var(--bg-code);
-            padding: 2px 6px;
-            border-radius: 4px;
-            color: #67e8f9;
+            padding: 1px 5px;
+            border: 1px solid var(--border);
+            color: var(--cyan);
         }
 
         .answer pre {
             background: var(--bg-code);
             border: 1px solid var(--border);
-            border-radius: var(--radius-sm);
-            padding: 14px 16px;
+            padding: 12px;
             overflow-x: auto;
-            margin: 12px 0;
-            font-size: 13px;
-            line-height: 1.5;
+            margin: 10px 0;
+            font-size: 16px;
+            line-height: 1.4;
         }
 
         .answer pre code {
             background: none;
             padding: 0;
-            color: #a5f3fc;
+            border: none;
+            color: var(--green);
         }
 
         .answer ul, .answer ol {
-            margin: 8px 0;
-            padding-left: 20px;
+            margin: 6px 0;
+            padding-left: 4px;
+            list-style: none;
         }
 
-        .answer li { margin-bottom: 4px; }
+        .answer li { margin-bottom: 2px; }
+        .answer li::before { content: '> '; color: var(--green-dim); }
+
+        .answer table {
+            border-collapse: collapse;
+            margin: 10px 0;
+            width: 100%;
+            font-size: 16px;
+        }
+
+        .answer th, .answer td {
+            border: 1px solid var(--border);
+            padding: 4px 10px;
+            text-align: left;
+        }
+
+        .answer th {
+            color: var(--green-bright);
+            background: var(--bg-code);
+            text-transform: uppercase;
+            font-weight: normal;
+            letter-spacing: 1px;
+        }
 
         /* === Source Cards === */
         .sources-header {
-            font-size: 13px;
-            font-weight: 600;
-            color: var(--text-secondary);
+            font-size: 14px;
+            color: var(--green-dim);
             text-transform: uppercase;
-            letter-spacing: 0.5px;
-            margin-bottom: 12px;
+            letter-spacing: 2px;
+            margin-bottom: 10px;
+            padding-top: 4px;
+            border-top: 1px solid var(--border);
         }
 
         .source {
-            background: var(--bg-card);
             border: 1px solid var(--border);
-            border-radius: var(--radius-md);
-            margin-bottom: 10px;
+            margin-bottom: 8px;
             overflow: hidden;
-            transition: border-color var(--transition), box-shadow var(--transition);
-            animation: fadeSlideIn 0.3s ease backwards;
+            transition: border-color 0.1s;
+            animation: fadeIn 0.3s ease backwards;
         }
 
-        .source:hover {
-            border-color: var(--border-hover);
-            box-shadow: var(--shadow-md);
-        }
+        .source:hover { border-color: var(--green-dim); }
 
         .source-header {
             display: flex;
             align-items: center;
             gap: 10px;
-            padding: 12px 16px;
+            padding: 8px 12px;
             border-bottom: 1px solid var(--border);
+            background: var(--bg-panel);
             flex-wrap: wrap;
+            font-size: 16px;
         }
 
         .source-file {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            font-family: var(--font-mono);
-            font-size: 13px;
-            font-weight: 500;
-            color: var(--text-primary);
+            color: var(--green);
+            font-size: 16px;
         }
 
-        .source-file .icon { color: var(--accent); font-size: 14px; }
+        .source-file::before { content: '['; color: var(--green-dim); }
+        .source-file::after { content: ']'; color: var(--green-dim); }
 
-        .source-lines {
-            font-size: 12px;
-            color: var(--text-muted);
-        }
+        .source-lines { color: var(--green-dim); font-size: 14px; }
 
         .source-name {
-            font-size: 12px;
-            font-weight: 500;
-            color: var(--accent);
-            background: var(--accent-subtle);
-            padding: 2px 8px;
-            border-radius: 4px;
+            color: var(--cyan);
+            font-size: 16px;
+        }
+
+        .source-level {
+            color: var(--green-dim);
+            font-size: 14px;
         }
 
         .score-badge {
             margin-left: auto;
-            font-size: 12px;
-            font-weight: 600;
-            padding: 3px 8px;
-            border-radius: 4px;
+            font-size: 16px;
+            padding: 0 6px;
         }
 
-        .score-high { color: var(--success); background: rgba(52, 211, 153, 0.1); }
-        .score-mid { color: var(--accent); background: var(--accent-subtle); }
-        .score-low { color: var(--warning); background: rgba(251, 191, 36, 0.1); }
+        .score-high { color: var(--green-bright); text-shadow: 0 0 8px var(--green-glow); }
+        .score-mid { color: var(--green); }
+        .score-low { color: var(--amber); }
 
         .source-code {
             position: relative;
@@ -383,149 +439,173 @@
         .source-code pre {
             background: var(--bg-code);
             margin: 0;
-            padding: 14px 16px;
-            font-family: var(--font-mono);
-            font-size: 12.5px;
-            line-height: 1.5;
+            padding: 12px;
+            font-family: var(--font-alt);
+            font-size: 15px;
+            line-height: 1.4;
             overflow-x: auto;
-            border-radius: 0;
-            color: #c9d1d9;
+            color: var(--green);
         }
 
         .source-code pre code { color: inherit; background: none; padding: 0; }
 
         .code-fade {
             position: absolute;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            height: 60px;
+            bottom: 0; left: 0; right: 0;
+            height: 50px;
             background: linear-gradient(transparent, var(--bg-code));
             pointer-events: none;
         }
 
         .source-actions {
             display: flex;
-            align-items: center;
             gap: 8px;
-            padding: 8px 16px;
+            padding: 6px 12px;
             border-top: 1px solid var(--border);
-            background: var(--bg-secondary);
+            background: var(--bg-panel);
         }
 
         .action-btn {
-            font-family: var(--font-ui);
-            font-size: 12px;
-            font-weight: 500;
-            color: var(--text-muted);
+            font-family: var(--font);
+            font-size: 16px;
+            color: var(--green-dim);
             background: none;
             border: 1px solid var(--border);
-            border-radius: 6px;
-            padding: 4px 10px;
+            padding: 2px 10px;
             cursor: pointer;
-            transition: all var(--transition);
+            transition: all 0.1s;
         }
 
-        .action-btn:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-subtle); }
+        .action-btn:hover {
+            color: var(--green);
+            border-color: var(--green-dim);
+            text-shadow: 0 0 5px var(--green-glow);
+        }
 
         /* === Empty State === */
         .empty-state {
             text-align: center;
-            padding: 64px 20px;
-            color: var(--text-muted);
+            padding: 48px 20px;
+            color: var(--green-dim);
         }
 
-        .empty-state .icon { font-size: 40px; margin-bottom: 12px; opacity: 0.5; }
-        .empty-state p { font-size: 14px; }
+        .empty-ascii {
+            font-size: 18px;
+            color: var(--green-dim);
+            margin-bottom: 12px;
+            white-space: pre;
+            line-height: 1.2;
+        }
+
+        .empty-state p { font-size: 16px; }
 
         /* === Error === */
         .error-msg {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            background: rgba(248, 113, 113, 0.08);
-            border: 1px solid rgba(248, 113, 113, 0.25);
-            border-radius: var(--radius-md);
-            padding: 14px 18px;
-            color: var(--error);
-            font-size: 14px;
+            border: 1px solid var(--red);
+            padding: 12px;
+            color: var(--red);
+            font-size: 16px;
         }
+
+        .error-msg::before { content: 'ERROR: '; }
 
         /* === Animations === */
-        @keyframes fadeSlideIn {
-            from { opacity: 0; transform: translateY(8px); }
-            to { opacity: 1; transform: translateY(0); }
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
         }
 
-        /* === Fortran Syntax Highlights (manual) === */
-        .kw { color: #c084fc; }  /* keywords */
-        .ty { color: #f472b6; }  /* types */
-        .cm { color: #64748b; }  /* comments */
-        .st { color: #34d399; }  /* strings */
-        .nb { color: #fbbf24; }  /* numbers */
-        .fn { color: #38bdf8; }  /* function names */
+        /* === Fortran Syntax — retro CRT colors === */
+        .kw { color: #ff66ff; }  /* keywords — magenta */
+        .ty { color: #ff6666; }  /* types — red */
+        .cm { color: #336600; }  /* comments — dark green */
+        .st { color: #ffcc00; }  /* strings — yellow */
+        .nb { color: #00ffcc; }  /* numbers — cyan */
+        .fn { color: #66ff66; }  /* function names — bright green */
 
         /* === Responsive === */
         @media (max-width: 640px) {
             .search-row { flex-direction: column; }
+            .prompt-symbol { border-right: 1px solid var(--border); border-bottom: none; }
+            #query { border-right: 1px solid var(--border); }
             #btn { width: 100%; justify-content: center; }
             .source-header { gap: 6px; }
             .score-badge { margin-left: 0; }
-            .meta-bar { flex-wrap: wrap; gap: 8px; }
+            .meta-bar { flex-wrap: wrap; gap: 6px; }
+            .ascii-art { font-size: 10px; }
         }
 
         /* === Scrollbar === */
-        ::-webkit-scrollbar { width: 6px; height: 6px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
-        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: var(--bg); }
+        ::-webkit-scrollbar-thumb { background: var(--green-muted); }
+        ::-webkit-scrollbar-thumb:hover { background: var(--green-dim); }
 
         /* === Focus === */
         :focus-visible {
-            outline: 2px solid var(--accent);
-            outline-offset: 2px;
+            outline: 1px solid var(--green);
+            outline-offset: 1px;
+        }
+
+        /* === Selection === */
+        ::selection {
+            background: var(--green);
+            color: var(--bg);
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <!-- Hero -->
+        <!-- Header -->
         <header class="hero">
-            <div class="hero-icon">🔍</div>
-            <h1>Legacy<span>Lens</span></h1>
-            <p>AI-powered search and code understanding for the BLAS Fortran codebase. Ask questions in natural language.</p>
+            <div class="ascii-art">
+ _                                _
+| |    ___  __ _  __ _  ___ _   _| |    ___ _ __  ___
+| |   / _ \/ _` |/ _` |/ __| | | | |   / _ \ '_ \/ __|
+| |__|  __/ (_| | (_| | (__| |_| | |__|  __/ | | \__ \
+|_____\___|\__, |\__,_|\___|\__, |_____\___|_| |_|___/
+           |___/            |___/</div>
+            <div class="hero-sub">BLAS Fortran Code Explorer</div>
+            <div class="hero-divider">════════════════════════════════════════════════</div>
+            <div class="sys-info">SYSTEM READY &mdash; <span>169</span> SUBROUTINES INDEXED &mdash; VECTOR DB ONLINE</div>
         </header>
 
         <!-- Search -->
         <div class="search-area">
+            <div class="terminal-label">&gt; Enter query:</div>
             <div class="search-row">
+                <div class="prompt-symbol">$&gt;</div>
                 <input
                     type="text"
                     id="query"
-                    placeholder="Ask about BLAS subroutines, operations, or patterns..."
+                    placeholder="ask about BLAS subroutines..."
                     autofocus
                     aria-label="Search the BLAS codebase"
                 />
-                <button id="btn" aria-label="Search">
-                    <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-                    Search
-                </button>
+                <button id="btn" aria-label="Search">[EXEC]</button>
             </div>
             <div class="search-hints">
-                <span class="hint" onclick="fillQuery('What does DGEMM do?')">What does DGEMM do?</span>
-                <span class="hint" onclick="fillQuery('How does matrix-vector multiplication work in BLAS?')">How does matrix-vector multiplication work?</span>
-                <span class="hint" onclick="fillQuery('Explain the difference between Level 1, 2, and 3 BLAS operations')">Explain BLAS levels</span>
-                <span class="hint" onclick="fillQuery('Show me all vector swap operations')">Show me all vector swap operations</span>
-                <span class="hint" onclick="fillQuery('How does BLAS handle complex number arithmetic?')">Complex number arithmetic</span>
-                <span class="hint" onclick="fillQuery('What error handling patterns are used in BLAS?')">Error handling patterns</span>
+                <span class="hint" onclick="fillQuery('What does DGEMM do?')">&gt; What does DGEMM do?</span>
+                <span class="hint" onclick="fillQuery('How does matrix-vector multiplication work in BLAS?')">&gt; Matrix-vector multiply</span>
+                <span class="hint" onclick="fillQuery('Explain the difference between Level 1, 2, and 3 BLAS operations')">&gt; BLAS levels</span>
+                <span class="hint" onclick="fillQuery('Show me all vector swap operations')">&gt; Vector swap ops</span>
+                <span class="hint" onclick="fillQuery('How does BLAS handle complex number arithmetic?')">&gt; Complex arithmetic</span>
+                <span class="hint" onclick="fillQuery('What error handling patterns are used in BLAS?')">&gt; Error patterns</span>
             </div>
         </div>
 
         <!-- Results -->
         <div id="results">
             <div class="empty-state">
-                <div class="icon">📜</div>
-                <p>Search 169 BLAS subroutines across the Fortran codebase</p>
+                <div class="empty-ascii">   ___________
+  |  _______ |
+  | |       ||
+  | | READY ||
+  | |_______||
+  |___________|
+  /           /
+ /___________/</div>
+                <p>Awaiting query... Type a question and press [EXEC] or ENTER</p>
             </div>
         </div>
     </div>
@@ -535,7 +615,7 @@
         const btn = document.getElementById('btn');
         const results = document.getElementById('results');
 
-        input.addEventListener('keydown', (e) => { if (e.key === 'Enter') search(); });
+        input.addEventListener('keydown', function(e) { if (e.key === 'Enter') search(); });
 
         function fillQuery(text) {
             input.value = text;
@@ -548,114 +628,137 @@
             if (!query) return;
             btn.disabled = true;
 
-            results.innerHTML = `
-                <div class="loading-container">
-                    <div class="spinner"></div>
-                    <div class="loading-text">Searching BLAS codebase...</div>
-                </div>
-                <div class="loading-shimmer"></div>
-                <div class="loading-shimmer" style="height:80px;animation-delay:0.2s"></div>
-            `;
+            results.textContent = '';
+            var loadDiv = document.createElement('div');
+            loadDiv.className = 'loading-container';
+            loadDiv.appendChild(makeLine('QUERY RECEIVED: "' + esc(query) + '"'));
+            loadDiv.appendChild(makeLine('EMBEDDING QUERY VIA text-embedding-3-small...'));
+            loadDiv.appendChild(makeLine('SEARCHING PINECONE INDEX [legacylens]...'));
+            var lastLine = makeLine('GENERATING RESPONSE VIA CLAUDE...');
+            var cur = document.createElement('span');
+            cur.className = 'cursor';
+            lastLine.appendChild(cur);
+            loadDiv.appendChild(lastLine);
+            var barLine = document.createElement('div');
+            barLine.className = 'loading-bar';
+            barLine.textContent = '[##########..........] PROCESSING';
+            loadDiv.appendChild(barLine);
+            results.appendChild(loadDiv);
 
             try {
-                const res = await fetch('/api/query', {
+                var res = await fetch('/api/query', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ query })
+                    body: JSON.stringify({ query: query })
                 });
 
-                if (!res.ok) throw new Error(`Server error (${res.status})`);
-                const data = await res.json();
+                if (!res.ok) throw new Error('Server error (' + res.status + ')');
+                var data = await res.json();
 
-                let html = '';
+                results.textContent = '';
 
                 // Meta bar
-                html += `<div class="meta-bar">
-                    <span class="badge badge-accent">
-                        <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
-                        ${data.query_time_ms.toFixed(0)}ms
-                    </span>
-                    <span class="badge badge-muted">${data.sources.length} source${data.sources.length !== 1 ? 's' : ''} found</span>
-                </div>`;
+                var typeLabel = (data.query_type || 'explain').toUpperCase();
+                var metaBar = document.createElement('div');
+                metaBar.className = 'meta-bar';
+                metaBar.innerHTML = 'QUERY COMPLETE &mdash; TIME: <span class="stat">' + data.query_time_ms.toFixed(0) + 'ms</span> &mdash; SOURCES: <span class="stat">' + data.sources.length + '</span> &mdash; MODE: <span class="stat">' + typeLabel + '</span>';
+                results.appendChild(metaBar);
 
                 // Answer
                 if (data.answer) {
-                    html += `<div class="answer">${formatAnswer(data.answer)}</div>`;
+                    var ansDiv = document.createElement('div');
+                    ansDiv.className = 'answer';
+                    ansDiv.innerHTML = '<div class="answer-label">&gt;&gt; RESPONSE</div>' + formatAnswer(data.answer);
+                    results.appendChild(ansDiv);
                 }
 
                 // Sources
                 if (data.sources.length > 0) {
-                    html += `<div class="sources-header">Source Code</div>`;
-                    data.sources.forEach((s, i) => {
-                        const m = s.chunk.metadata;
-                        const pct = (s.score * 100);
-                        const scoreClass = pct >= 45 ? 'score-high' : pct >= 35 ? 'score-mid' : 'score-low';
-                        const codeText = s.chunk.text;
-                        const isLong = codeText.length > 800;
-                        const id = `source-${i}`;
+                    var srcHeader = document.createElement('div');
+                    srcHeader.className = 'sources-header';
+                    srcHeader.textContent = '>> SOURCE FILES';
+                    results.appendChild(srcHeader);
 
-                        html += `<div class="source" style="animation-delay:${i * 0.07}s">
-                            <div class="source-header">
-                                <span class="source-file">
-                                    <span class="icon">📄</span>
-                                    ${esc(m.file_path)}
-                                </span>
-                                <span class="source-lines">L${m.start_line}–${m.end_line}</span>
-                                ${m.subroutine_name ? `<span class="source-name">${esc(m.subroutine_name)}</span>` : ''}
-                                ${m.blas_level !== 'unknown' ? `<span class="badge badge-muted">Level ${esc(m.blas_level)}</span>` : ''}
-                                <span class="score-badge ${scoreClass}">${pct.toFixed(1)}%</span>
-                            </div>
-                            <div class="source-code ${isLong ? '' : 'expanded'}" id="${id}">
-                                <pre><code>${highlightFortran(esc(codeText))}</code></pre>
-                                ${isLong ? '<div class="code-fade"></div>' : ''}
-                            </div>
-                            <div class="source-actions">
-                                ${isLong ? `<button class="action-btn" onclick="toggleExpand('${id}', this)">Show more</button>` : ''}
-                                <button class="action-btn" onclick="copyCode(this, ${JSON.stringify(codeText).replace(/'/g, '\\\'')})">Copy</button>
-                            </div>
-                        </div>`;
+                    data.sources.forEach(function(s, i) {
+                        var m = s.chunk.metadata;
+                        var pct = (s.score * 100);
+                        var scoreClass = pct >= 45 ? 'score-high' : pct >= 35 ? 'score-mid' : 'score-low';
+                        var codeText = s.chunk.text;
+                        var isLong = codeText.length > 800;
+                        var id = 'source-' + i;
+
+                        var card = document.createElement('div');
+                        card.className = 'source';
+                        card.style.animationDelay = (i * 0.07) + 's';
+
+                        var headerHtml = '<div class="source-header">';
+                        headerHtml += '<span class="source-file">' + esc(m.file_path) + '</span>';
+                        headerHtml += '<span class="source-lines">L' + m.start_line + '-' + m.end_line + '</span>';
+                        if (m.subroutine_name) headerHtml += '<span class="source-name">' + esc(m.subroutine_name) + '</span>';
+                        if (m.blas_level !== 'unknown') headerHtml += '<span class="source-level">LVL.' + esc(m.blas_level) + '</span>';
+                        headerHtml += '<span class="score-badge ' + scoreClass + '">' + pct.toFixed(1) + '%</span>';
+                        headerHtml += '</div>';
+
+                        var codeHtml = '<div class="source-code ' + (isLong ? '' : 'expanded') + '" id="' + id + '">';
+                        codeHtml += '<pre><code>' + highlightFortran(esc(codeText)) + '</code></pre>';
+                        if (isLong) codeHtml += '<div class="code-fade"></div>';
+                        codeHtml += '</div>';
+
+                        var actionsHtml = '<div class="source-actions">';
+                        if (isLong) actionsHtml += '<button class="action-btn" onclick="toggleExpand(\'' + id + '\', this)">[MORE]</button>';
+                        actionsHtml += '<button class="action-btn" onclick="copyCode(this, ' + JSON.stringify(codeText).replace(/'/g, "\\'") + ')">[COPY]</button>';
+                        actionsHtml += '</div>';
+
+                        card.innerHTML = headerHtml + codeHtml + actionsHtml;
+                        results.appendChild(card);
                     });
                 } else {
-                    html += `<div class="empty-state">
-                        <div class="icon">🔎</div>
-                        <p>No relevant results found. Try rephrasing your query.</p>
-                    </div>`;
+                    var emptyDiv = document.createElement('div');
+                    emptyDiv.className = 'empty-state';
+                    emptyDiv.textContent = 'NO MATCHES FOUND. REFINE QUERY AND RETRY.';
+                    results.appendChild(emptyDiv);
                 }
-
-                results.innerHTML = html;
             } catch (err) {
-                results.innerHTML = `<div class="error-msg">
-                    <span>⚠️</span>
-                    <span>Error: ${esc(err.message)}</span>
-                </div>`;
+                results.textContent = '';
+                var errDiv = document.createElement('div');
+                errDiv.className = 'error-msg';
+                errDiv.textContent = err.message;
+                results.appendChild(errDiv);
             }
             btn.disabled = false;
         }
 
+        function makeLine(text) {
+            var el = document.createElement('div');
+            el.className = 'loading-line';
+            el.textContent = text;
+            return el;
+        }
+
         function toggleExpand(id, button) {
-            const el = document.getElementById(id);
-            const expanded = el.classList.toggle('expanded');
-            const fade = el.querySelector('.code-fade');
+            var el = document.getElementById(id);
+            var expanded = el.classList.toggle('expanded');
+            var fade = el.querySelector('.code-fade');
             if (fade) fade.style.display = expanded ? 'none' : '';
-            button.textContent = expanded ? 'Show less' : 'Show more';
+            button.textContent = expanded ? '[LESS]' : '[MORE]';
         }
 
         function copyCode(button, text) {
-            navigator.clipboard.writeText(text).then(() => {
-                const orig = button.textContent;
-                button.textContent = 'Copied!';
-                button.style.color = 'var(--success)';
-                button.style.borderColor = 'var(--success)';
-                setTimeout(() => {
+            navigator.clipboard.writeText(text).then(function() {
+                var orig = button.textContent;
+                button.textContent = '[OK!]';
+                button.style.color = 'var(--green-bright)';
+                button.style.textShadow = '0 0 8px var(--green-glow)';
+                setTimeout(function() {
                     button.textContent = orig;
                     button.style.color = '';
-                    button.style.borderColor = '';
-                }, 1500);
+                    button.style.textShadow = '';
+                }, 1200);
             });
         }
 
         function esc(text) {
-            const div = document.createElement('div');
+            var div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
         }
@@ -664,8 +767,9 @@
             return text
                 .replace(/###\s+(.+)/g, '<h3>$1</h3>')
                 .replace(/##\s+(.+)/g, '<h2>$1</h2>')
-                .replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) =>
-                    `<pre><code>${highlightFortran(esc(code))}</code></pre>`)
+                .replace(/```(\w*)\n([\s\S]*?)```/g, function(_, lang, code) {
+                    return '<pre><code>' + highlightFortran(esc(code)) + '</code></pre>';
+                })
                 .replace(/`([^`]+)`/g, '<code>$1</code>')
                 .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
                 .replace(/^\s*[-*]\s+(.+)/gm, '<li>$1</li>')
@@ -676,17 +780,11 @@
 
         function highlightFortran(code) {
             return code
-                // Comments (lines starting with C, c, *, or !)
                 .replace(/^([Cc*!].*)$/gm, '<span class="cm">$1</span>')
-                // Inline comments
                 .replace(/(![^'"\n]*)$/gm, '<span class="cm">$1</span>')
-                // Strings
                 .replace(/'([^']*)'/g, '<span class="st">\'$1\'</span>')
-                // Types
                 .replace(/\b(DOUBLE\s+PRECISION|REAL|INTEGER|COMPLEX|LOGICAL|CHARACTER|IMPLICIT\s+NONE)\b/gi, '<span class="ty">$1</span>')
-                // Keywords
                 .replace(/\b(SUBROUTINE|FUNCTION|END|IF|THEN|ELSE|DO|CONTINUE|RETURN|CALL|PARAMETER|EXTERNAL|INTRINSIC|GOTO|PROGRAM|MODULE|USE|DATA)\b/g, '<span class="kw">$1</span>')
-                // Numbers
                 .replace(/\b(\d+\.?\d*(?:[DdEe][+-]?\d+)?)\b/g, '<span class="nb">$1</span>');
         }
     </script>
