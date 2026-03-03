@@ -30,4 +30,5 @@ class QueryRequest(BaseModel):
 class QueryResponse(BaseModel):
     answer: str
     sources: list[SearchResult]
+    query_type: str = "explain"
     query_time_ms: float

@@ -50,4 +50,9 @@ class TestQueryResponse:
         resp = QueryResponse(answer="test", sources=[], query_time_ms=100.0)
         assert resp.answer == "test"
         assert resp.sources == []
+        assert resp.query_type == "explain"  # default
         assert resp.query_time_ms == 100.0
+
+    def test_with_query_type(self):
+        resp = QueryResponse(answer="docs", sources=[], query_type="document", query_time_ms=50.0)
+        assert resp.query_type == "document"
