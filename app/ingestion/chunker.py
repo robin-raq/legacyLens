@@ -1,6 +1,7 @@
 """Syntax-aware chunker for Fortran BLAS source code.
 
 Splits on SUBROUTINE / FUNCTION / END boundaries using regex.
+Extracts rich metadata from BLAS file headers (Purpose, params).
 Falls back to fixed-size chunking for files that don't match.
 """
 
@@ -52,13 +53,116 @@ def _detect_data_type(name: str) -> str:
 def _detect_blas_level(name: str) -> str:
     """Detect BLAS level (1, 2, or 3) from subroutine name."""
     upper = name.upper()
-    # Strip data type prefix (first char)
     suffix = upper[1:] if len(upper) > 1 else ""
     for level, ops in _BLAS_LEVELS.items():
         for op in ops:
             if suffix == op or suffix.startswith(op):
                 return level
     return "unknown"
+
+
+def _extract_purpose_block(lines: list[str]) -> str:
+    """Extract the Purpose section from the BLAS file header.
+
+    BLAS files have a structured header above the SUBROUTINE line:
+        *> \\par Purpose:
+        *  =============
+        *> \\verbatim
+        *>
+        *> DGEMM performs one of the matrix-matrix operations ...
+        *> \\endverbatim
+
+    We grab the text between \\verbatim and \\endverbatim after
+    the Purpose marker, strip the *> comment prefixes, and return
+    clean English text.
+    """
+    in_purpose = False
+    in_verbatim = False
+    purpose_lines = []
+
+    for line in lines:
+        stripped = line.strip()
+
+        # Look for the Purpose marker
+        if "\\par Purpose" in stripped or "Purpose:" in stripped:
+            in_purpose = True
+            continue
+
+        if in_purpose:
+            # Enter the verbatim block (the actual description text)
+            if "\\verbatim" in stripped and "\\endverbatim" not in stripped:
+                in_verbatim = True
+                continue
+
+            # Exit the verbatim block — we're done
+            if "\\endverbatim" in stripped:
+                break
+
+            if in_verbatim:
+                # Strip the *> or * comment prefix
+                text = stripped
+                if text.startswith("*>"):
+                    text = text[2:].strip()
+                elif text.startswith("*"):
+                    text = text[1:].strip()
+                purpose_lines.append(text)
+
+    # Join and clean up (collapse multiple blank lines)
+    result = "\n".join(purpose_lines).strip()
+    # Collapse runs of blank lines into single blank line
+    result = re.sub(r"\n{3,}", "\n\n", result)
+    return result
+
+
+def _extract_param_summary(lines: list[str]) -> str:
+    """Extract a brief summary of parameters from the file header.
+
+    Returns a compact list like:
+      TRANSA: CHARACTER*1 - form of op(A)
+      M: INTEGER - number of rows
+
+    We only grab the first line of each param description to keep it short.
+    """
+    params = []
+    current_param = None
+    in_verbatim = False
+
+    for line in lines:
+        stripped = line.strip()
+
+        # Detect \param[in] NAME or \param[in,out] NAME
+        param_match = re.search(r"\\param\[[\w,]+\]\s+(\w+)", stripped)
+        if param_match:
+            current_param = param_match.group(1)
+            in_verbatim = False
+            continue
+
+        if current_param:
+            if "\\verbatim" in stripped and "\\endverbatim" not in stripped:
+                in_verbatim = True
+                continue
+
+            if "\\endverbatim" in stripped:
+                current_param = None
+                in_verbatim = False
+                continue
+
+            if in_verbatim:
+                text = stripped
+                if text.startswith("*>"):
+                    text = text[2:].strip()
+                elif text.startswith("*"):
+                    text = text[1:].strip()
+
+                # Grab the first meaningful line (usually "NAME is TYPE")
+                if text and current_param and current_param not in [p.split(":")[0] for p in params]:
+                    params.append(f"{current_param}: {text}")
+
+        # Stop once we hit the actual code (subroutine declaration)
+        if _START_PATTERN.match(line):
+            break
+
+    return "\n".join(params[:12])  # Cap at 12 params to avoid huge chunks
 
 
 def _extract_header_comment(lines: list[str], start_idx: int) -> str:
@@ -68,7 +172,6 @@ def _extract_header_comment(lines: list[str], start_idx: int) -> str:
         line = lines[i]
         stripped = line.lstrip()
         if stripped and stripped[0] in ("c", "C", "*", "!"):
-            # Remove comment character and leading spaces
             comment_text = stripped[1:].strip()
             if comment_text:
                 comments.append(comment_text)
@@ -76,11 +179,18 @@ def _extract_header_comment(lines: list[str], start_idx: int) -> str:
             continue
         else:
             break
-    return " ".join(comments[:5])  # First 5 meaningful comment lines
+    return " ".join(comments[:5])
 
 
 def chunk_fortran_file(file_path: Path, source_dir: str) -> list[CodeChunk]:
-    """Split a Fortran file into subroutine/function-level chunks."""
+    """Split a Fortran file into subroutine/function-level chunks.
+
+    Each chunk includes:
+    - The Purpose description from the file header (if present)
+    - A brief parameter summary
+    - Rich metadata prefix for better embedding quality
+    - The actual subroutine source code
+    """
     try:
         content = file_path.read_text(encoding="utf-8", errors="replace")
     except Exception:
@@ -89,6 +199,10 @@ def chunk_fortran_file(file_path: Path, source_dir: str) -> list[CodeChunk]:
     lines = content.split("\n")
     rel_path = str(file_path.relative_to(source_dir))
     chunks = []
+
+    # Extract documentation from the file header (above the SUBROUTINE line)
+    purpose = _extract_purpose_block(lines)
+    param_summary = _extract_param_summary(lines)
 
     # Find all subroutine/function boundaries
     boundaries = []
@@ -103,7 +217,6 @@ def chunk_fortran_file(file_path: Path, source_dir: str) -> list[CodeChunk]:
         if end_match and boundaries and "end" not in boundaries[-1]:
             boundaries[-1]["end"] = i
 
-    # If we found subroutine boundaries, use them
     if boundaries:
         for b in boundaries:
             start = b["start"]
@@ -112,17 +225,24 @@ def chunk_fortran_file(file_path: Path, source_dir: str) -> list[CodeChunk]:
             chunk_text = "\n".join(chunk_lines)
             name = b["name"]
 
-            description = _extract_header_comment(lines, start)
+            # Use purpose block if available, fall back to inline header comment
+            description = purpose if purpose else _extract_header_comment(lines, start)
             data_type = _detect_data_type(name)
             blas_level = _detect_blas_level(name)
 
-            # Prepend metadata to chunk text for better semantic matching
+            # Build a rich metadata prefix for the embedding
             metadata_prefix = f"BLAS {b['kind']} {name}"
             if blas_level != "unknown":
                 metadata_prefix += f" (Level {blas_level}, {data_type})"
+            metadata_prefix += "\n"
+
             if description:
-                metadata_prefix += f": {description}"
-            metadata_prefix += "\n\n"
+                metadata_prefix += f"\nPurpose: {description}\n"
+
+            if param_summary:
+                metadata_prefix += f"\nParameters:\n{param_summary}\n"
+
+            metadata_prefix += "\nSource Code:\n"
 
             chunk_id = f"{rel_path}::{name}".replace("/", "_").replace("\\", "_")
 
@@ -136,12 +256,12 @@ def chunk_fortran_file(file_path: Path, source_dir: str) -> list[CodeChunk]:
                     subroutine_name=name,
                     blas_level=blas_level,
                     data_type=data_type,
-                    description=description,
+                    description=description[:500],  # Cap for metadata storage
                     line_count=end - start + 1,
                 ),
             ))
     else:
-        # Fallback: whole file as one chunk (for files without clear boundaries)
+        # Fallback: whole file as one chunk
         if len(lines) > 5:
             chunk_text = content
             chunk_id = f"{rel_path}::file".replace("/", "_").replace("\\", "_")
