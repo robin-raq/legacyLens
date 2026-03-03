@@ -8,3 +8,4 @@ blas_src/
 *.egg-info/
 dist/
 build/
+walkthrough.md
