@@ -39,13 +39,21 @@ def upsert_chunks(chunks: list[CodeChunk], embeddings: list[list[float]]) -> int
     return upserted
 
 
-def search(query_embedding: list[float], top_k: int = 5) -> list[dict]:
-    """Search for similar chunks."""
-    results = _index.query(
-        vector=query_embedding,
-        top_k=top_k,
-        include_metadata=True,
-    )
+def search(query_embedding: list[float], top_k: int = 5, metadata_filter: dict | None = None) -> list[dict]:
+    """Search for similar chunks, optionally filtered by metadata.
+
+    Args:
+        metadata_filter: Pinecone filter dict, e.g. {"blas_level": {"$eq": "3"}}.
+                         Applied server-side before ANN search.
+    """
+    kwargs = {
+        "vector": query_embedding,
+        "top_k": top_k,
+        "include_metadata": True,
+    }
+    if metadata_filter:
+        kwargs["filter"] = metadata_filter
+    results = _index.query(**kwargs)
     return results.matches
 
 
