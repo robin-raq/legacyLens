@@ -652,12 +652,14 @@
                 <button id="newBtn" aria-label="New Session" onclick="newSession()" title="Start new conversation">[NEW]</button>
             </div>
             <div class="search-hints">
-                <span class="hint" onclick="fillQuery('What does DGEMM do?')">&gt; What does DGEMM do?</span>
-                <span class="hint" onclick="fillQuery('How does matrix-vector multiplication work in BLAS?')">&gt; Matrix-vector multiply</span>
-                <span class="hint" onclick="fillQuery('Explain the difference between Level 1, 2, and 3 BLAS operations')">&gt; BLAS levels</span>
-                <span class="hint" onclick="fillQuery('Show me all vector swap operations')">&gt; Vector swap ops</span>
-                <span class="hint" onclick="fillQuery('How does BLAS handle complex number arithmetic?')">&gt; Complex arithmetic</span>
-                <span class="hint" onclick="fillQuery('What error handling patterns are used in BLAS?')">&gt; Error patterns</span>
+                <span class="hint" onclick="fillQuery('What does DGEMM do?')">&gt; Explain DGEMM</span>
+                <span class="hint" onclick="fillQuery('What routines does DGEMM call and depend on?')">&gt; Dependencies</span>
+                <span class="hint" onclick="fillQuery('Find routines similar to DGEMM across the codebase')">&gt; Find patterns</span>
+                <span class="hint" onclick="fillQuery('What would be affected if DSCAL changes?')">&gt; Impact analysis</span>
+                <span class="hint" onclick="fillQuery('Generate documentation for SGEMV')">&gt; Generate docs</span>
+                <span class="hint" onclick="fillQuery('What modern Python/NumPy equivalents exist for DAXPY?')">&gt; Translation hints</span>
+                <span class="hint" onclick="fillQuery('Find potential bug patterns or issues in DTRSM')">&gt; Bug patterns</span>
+                <span class="hint" onclick="fillQuery('Extract the core algorithm and business logic from DGEMM')">&gt; Business logic</span>
             </div>
         </div>
 
@@ -704,6 +706,48 @@
             input.focus();
         }
 
+        function renderSourceCards(sourcesData) {
+            if (!sourcesData || sourcesData.length === 0) return;
+            var srcHeader = document.createElement('div');
+            srcHeader.className = 'sources-header';
+            srcHeader.textContent = '>> SOURCE FILES';
+            results.appendChild(srcHeader);
+
+            sourcesData.forEach(function(s, i) {
+                var m = s.chunk.metadata;
+                var pct = (s.score * 100);
+                var scoreClass = pct >= 45 ? 'score-high' : pct >= 35 ? 'score-mid' : 'score-low';
+                var codeText = s.chunk.text;
+                var isLong = codeText.length > 800;
+                var id = 'source-' + (sourceCounter++);
+
+                var card = document.createElement('div');
+                card.className = 'source';
+                card.style.animationDelay = (i * 0.07) + 's';
+
+                var headerHtml = '<div class="source-header">';
+                headerHtml += '<span class="source-file">' + esc(m.file_path) + '</span>';
+                headerHtml += '<span class="source-lines">L' + m.start_line + '-' + m.end_line + '</span>';
+                if (m.subroutine_name) headerHtml += '<span class="source-name">' + esc(m.subroutine_name) + '</span>';
+                if (m.blas_level !== 'unknown') headerHtml += '<span class="source-level">LVL.' + esc(m.blas_level) + '</span>';
+                headerHtml += '<span class="score-badge ' + scoreClass + '">' + pct.toFixed(1) + '%</span>';
+                headerHtml += '</div>';
+
+                var codeHtml = '<div class="source-code ' + (isLong ? '' : 'expanded') + '" id="' + id + '">';
+                codeHtml += '<pre><code>' + highlightFortran(esc(codeText)) + '</code></pre>';
+                if (isLong) codeHtml += '<div class="code-fade"></div>';
+                codeHtml += '</div>';
+
+                var actionsHtml = '<div class="source-actions">';
+                if (isLong) actionsHtml += '<button class="action-btn" onclick="toggleExpand(\'' + id + '\', this)">[MORE]</button>';
+                actionsHtml += '<button class="action-btn" onclick="copyCode(this, ' + JSON.stringify(codeText).replace(/'/g, "\\'") + ')">[COPY]</button>';
+                actionsHtml += '</div>';
+
+                card.innerHTML = headerHtml + codeHtml + actionsHtml;
+                results.appendChild(card);
+            });
+        }
+
         async function search() {
             const query = input.value.trim();
             if (!query) return;
@@ -714,122 +758,116 @@
             var emptyState = results.querySelector('.empty-state');
             if (emptyState) emptyState.remove();
 
-            // Show user query
+            // Show user query echo
             var userDiv = document.createElement('div');
             userDiv.className = 'user-msg';
             userDiv.innerHTML = '<span class="prompt-echo">$&gt;</span> ' + esc(query);
             results.appendChild(userDiv);
 
-            // Show loading
-            var loadDiv = document.createElement('div');
-            loadDiv.className = 'loading-container';
-            loadDiv.id = 'current-loading';
-            loadDiv.appendChild(makeLine('ROUTING QUERY TO AGENT...'));
-            loadDiv.appendChild(makeLine('AGENT SELECTING TOOLS...'));
-            var lastLine = makeLine('GENERATING RESPONSE VIA CLAUDE...');
-            var cur = document.createElement('span');
-            cur.className = 'cursor';
-            lastLine.appendChild(cur);
-            loadDiv.appendChild(lastLine);
-            var barLine = document.createElement('div');
-            barLine.className = 'loading-bar';
-            barLine.textContent = '[##########..........] PROCESSING';
-            loadDiv.appendChild(barLine);
-            results.appendChild(loadDiv);
-            results.scrollTop = results.scrollHeight;
+            // Streaming placeholders
+            var toolDiv = null;
+            var ansDiv = null;
+            var answerText = '';
+            var sourcesData = [];
+            var toolCount = 0;
+            var queryTimeMs = 0;
 
             try {
                 var body = { query: query };
                 if (sessionId) body.session_id = sessionId;
 
-                var res = await fetch('/api/chat', {
+                var res = await fetch('/api/chat/stream', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(body)
                 });
 
                 if (!res.ok) throw new Error('Server error (' + res.status + ')');
-                var data = await res.json();
 
-                // Update session
-                sessionId = data.session_id;
+                var reader = res.body.getReader();
+                var decoder = new TextDecoder();
+                var buffer = '';
 
-                // Remove loading
-                var loader = document.getElementById('current-loading');
-                if (loader) loader.remove();
+                while (true) {
+                    var chunk = await reader.read();
+                    if (chunk.done) break;
 
-                // Tool calls section
-                if (data.tool_calls && data.tool_calls.length > 0) {
-                    var toolDiv = document.createElement('div');
-                    toolDiv.className = 'tool-calls-section';
-                    var toolHeader = '<div class="terminal-label" style="margin-bottom:6px">&gt; TOOL CALLS EXECUTED:</div>';
-                    var toolItems = '';
-                    data.tool_calls.forEach(function(tc) {
-                        var args = Object.entries(tc.tool_input).map(function(e) { return e[0] + '="' + e[1] + '"'; }).join(', ');
-                        var hasError = tc.tool_result && tc.tool_result.error;
-                        var statusClass = hasError ? 'score-low' : 'score-high';
-                        var statusText = hasError ? 'ERR' : 'OK';
-                        toolItems += '<div class="tool-call"><span class="tool-name">[' + esc(tc.tool_name) + ']</span> <span class="tool-args">' + esc(args) + '</span> <span class="score-badge ' + statusClass + '">' + statusText + '</span></div>';
-                    });
-                    toolDiv.innerHTML = toolHeader + toolItems;
-                    results.appendChild(toolDiv);
+                    buffer += decoder.decode(chunk.value, { stream: true });
+                    var parts = buffer.split('\n\n');
+                    buffer = parts.pop(); // keep incomplete event in buffer
+
+                    for (var raw of parts) {
+                        if (!raw.trim()) continue;
+                        var eventMatch = raw.match(/^event:\s*(\w+)\ndata:\s*(.+)$/s);
+                        if (!eventMatch) continue;
+                        var eventType = eventMatch[1];
+                        var eventData = JSON.parse(eventMatch[2]);
+
+                        switch (eventType) {
+                            case 'session':
+                                sessionId = eventData.session_id;
+                                break;
+
+                            case 'tool_start':
+                                if (!toolDiv) {
+                                    toolDiv = document.createElement('div');
+                                    toolDiv.className = 'tool-calls-section';
+                                    toolDiv.innerHTML = '<div class="terminal-label" style="margin-bottom:6px">&gt; TOOL CALLS:</div>';
+                                    results.appendChild(toolDiv);
+                                }
+                                toolCount++;
+                                var args = Object.entries(eventData.tool_input || {}).map(function(e) { return e[0] + '="' + e[1] + '"'; }).join(', ');
+                                var toolLine = document.createElement('div');
+                                toolLine.className = 'tool-call';
+                                toolLine.innerHTML = '<span class="tool-name">[' + esc(eventData.tool_name) + ']</span> <span class="tool-args">' + esc(args) + '</span> <span class="score-badge" style="color:var(--amber)">...</span>';
+                                toolDiv.appendChild(toolLine);
+                                results.scrollTop = results.scrollHeight;
+                                break;
+
+                            case 'tool_result':
+                                var lastBadge = toolDiv ? toolDiv.querySelector('.tool-call:last-child .score-badge') : null;
+                                if (lastBadge) {
+                                    var isErr = eventData.status === 'error';
+                                    lastBadge.className = 'score-badge ' + (isErr ? 'score-low' : 'score-high');
+                                    lastBadge.textContent = isErr ? 'ERR' : 'OK';
+                                    lastBadge.style.color = '';
+                                }
+                                break;
+
+                            case 'text_delta':
+                                if (!ansDiv) {
+                                    ansDiv = document.createElement('div');
+                                    ansDiv.className = 'answer';
+                                    ansDiv.innerHTML = '<div class="answer-label">&gt;&gt; RESPONSE</div><div class="answer-body"></div>';
+                                    results.appendChild(ansDiv);
+                                }
+                                answerText += eventData.chunk;
+                                ansDiv.querySelector('.answer-body').innerHTML = formatAnswer(answerText);
+                                results.scrollTop = results.scrollHeight;
+                                break;
+
+                            case 'sources':
+                                sourcesData = eventData;
+                                break;
+
+                            case 'done':
+                                queryTimeMs = eventData.query_time_ms;
+                                break;
+
+                            case 'error':
+                                throw new Error(eventData.message || 'Stream error');
+                        }
+                    }
                 }
 
                 // Meta bar
                 var metaBar = document.createElement('div');
                 metaBar.className = 'meta-bar';
-                metaBar.innerHTML = 'QUERY COMPLETE &mdash; TIME: <span class="stat">' + data.query_time_ms.toFixed(0) + 'ms</span> &mdash; SOURCES: <span class="stat">' + data.sources.length + '</span> &mdash; TOOLS: <span class="stat">' + (data.tool_calls ? data.tool_calls.length : 0) + '</span>';
+                metaBar.innerHTML = 'QUERY COMPLETE &mdash; TIME: <span class="stat">' + queryTimeMs.toFixed(0) + 'ms</span> &mdash; SOURCES: <span class="stat">' + sourcesData.length + '</span> &mdash; TOOLS: <span class="stat">' + toolCount + '</span>';
                 results.appendChild(metaBar);
 
-                // Answer
-                if (data.answer) {
-                    var ansDiv = document.createElement('div');
-                    ansDiv.className = 'answer';
-                    ansDiv.innerHTML = '<div class="answer-label">&gt;&gt; RESPONSE</div>' + formatAnswer(data.answer);
-                    results.appendChild(ansDiv);
-                }
-
                 // Sources
-                if (data.sources.length > 0) {
-                    var srcHeader = document.createElement('div');
-                    srcHeader.className = 'sources-header';
-                    srcHeader.textContent = '>> SOURCE FILES';
-                    results.appendChild(srcHeader);
-
-                    data.sources.forEach(function(s, i) {
-                        var m = s.chunk.metadata;
-                        var pct = (s.score * 100);
-                        var scoreClass = pct >= 45 ? 'score-high' : pct >= 35 ? 'score-mid' : 'score-low';
-                        var codeText = s.chunk.text;
-                        var isLong = codeText.length > 800;
-                        var id = 'source-' + (sourceCounter++);
-
-                        var card = document.createElement('div');
-                        card.className = 'source';
-                        card.style.animationDelay = (i * 0.07) + 's';
-
-                        var headerHtml = '<div class="source-header">';
-                        headerHtml += '<span class="source-file">' + esc(m.file_path) + '</span>';
-                        headerHtml += '<span class="source-lines">L' + m.start_line + '-' + m.end_line + '</span>';
-                        if (m.subroutine_name) headerHtml += '<span class="source-name">' + esc(m.subroutine_name) + '</span>';
-                        if (m.blas_level !== 'unknown') headerHtml += '<span class="source-level">LVL.' + esc(m.blas_level) + '</span>';
-                        headerHtml += '<span class="score-badge ' + scoreClass + '">' + pct.toFixed(1) + '%</span>';
-                        headerHtml += '</div>';
-
-                        var codeHtml = '<div class="source-code ' + (isLong ? '' : 'expanded') + '" id="' + id + '">';
-                        codeHtml += '<pre><code>' + highlightFortran(esc(codeText)) + '</code></pre>';
-                        if (isLong) codeHtml += '<div class="code-fade"></div>';
-                        codeHtml += '</div>';
-
-                        var actionsHtml = '<div class="source-actions">';
-                        if (isLong) actionsHtml += '<button class="action-btn" onclick="toggleExpand(\'' + id + '\', this)">[MORE]</button>';
-                        actionsHtml += '<button class="action-btn" onclick="copyCode(this, ' + JSON.stringify(codeText).replace(/'/g, "\\'") + ')">[COPY]</button>';
-                        actionsHtml += '</div>';
-
-                        card.innerHTML = headerHtml + codeHtml + actionsHtml;
-                        results.appendChild(card);
-                    });
-                }
+                renderSourceCards(sourcesData);
 
                 // Divider between turns
                 var turnDiv = document.createElement('div');
@@ -838,11 +876,9 @@
                 results.appendChild(turnDiv);
 
             } catch (err) {
-                var loader = document.getElementById('current-loading');
-                if (loader) loader.remove();
                 var errDiv = document.createElement('div');
                 errDiv.className = 'error-msg';
-                errDiv.textContent = 'ERROR: ' + err.message;
+                errDiv.textContent = err.message;
                 results.appendChild(errDiv);
             }
             btn.disabled = false;

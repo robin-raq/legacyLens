@@ -1,5 +1,6 @@
 """Tool definitions and executors for the LegacyLens agent."""
 
+import re
 import json
 from app.retrieval.search import search_codebase
 
@@ -77,6 +78,25 @@ TOOL_DEFINITIONS = [
                 },
             },
             "required": [],
+        },
+    },
+    {
+        "name": "analyze_dependencies",
+        "description": (
+            "Analyze what other routines a BLAS subroutine calls (dependency mapping). "
+            "Parses CALL statements and EXTERNAL declarations from the Fortran source. "
+            "Use this for dependency mapping, impact analysis, and understanding call relationships. "
+            "Returns the list of routines called and external references."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "routine_name": {
+                    "type": "string",
+                    "description": "The BLAS routine name to analyze (e.g., 'DGEMM')",
+                },
+            },
+            "required": ["routine_name"],
         },
     },
 ]
@@ -199,6 +219,66 @@ def execute_list_routines_by_level(
         return {"error": f"List failed: {str(e)}"}
 
 
+def parse_fortran_calls(source_code: str) -> dict:
+    """Parse CALL statements and EXTERNAL declarations from Fortran source.
+
+    Returns dict with 'calls' (list of routine names invoked via CALL)
+    and 'external_refs' (list of names declared EXTERNAL).
+    """
+    calls: set[str] = set()
+    externals: set[str] = set()
+
+    for line in source_code.split("\n"):
+        if not line.strip():
+            continue
+
+        # Fortran fixed-form: column 1 determines comments (C, c, *, !)
+        first_char = line[0] if line else ""
+        if first_char in ("C", "c", "*", "!"):
+            continue
+
+        # Find CALL ROUTINE_NAME(...)
+        for match in re.finditer(r"\bCALL\s+(\w+)", line, re.IGNORECASE):
+            calls.add(match.group(1).upper())
+
+        # Find EXTERNAL ROUTINE1, ROUTINE2, ...
+        ext_match = re.match(r"\s*EXTERNAL\s+(.+)", line.strip(), re.IGNORECASE)
+        if ext_match:
+            names = [n.strip().upper() for n in ext_match.group(1).split(",")]
+            externals.update(n for n in names if n)
+
+    return {
+        "calls": sorted(calls),
+        "external_refs": sorted(externals),
+    }
+
+
+def execute_analyze_dependencies(routine_name: str) -> dict:
+    """Analyze dependencies for a BLAS routine by parsing CALL/EXTERNAL statements."""
+    name = routine_name.strip().upper()
+    if not name:
+        return {"error": "Routine name must be non-empty."}
+
+    try:
+        info = execute_get_routine_info(name)
+        if not info.get("found"):
+            return info  # Pass through the not-found response
+
+        source = info.get("source_code", "")
+        deps = parse_fortran_calls(source)
+
+        return {
+            "routine_name": info["routine_name"],
+            "file_path": info["file_path"],
+            "blas_level": info["blas_level"],
+            "calls": deps["calls"],
+            "external_refs": deps["external_refs"],
+            "total_dependencies": len(set(deps["calls"]) | set(deps["external_refs"])),
+        }
+    except Exception as e:
+        return {"error": f"Dependency analysis failed: {str(e)}"}
+
+
 # ── Dispatcher ──
 
 
@@ -215,6 +295,9 @@ def dispatch_tool(tool_name: str, tool_input: dict) -> dict:
         "list_routines_by_level": lambda inp: execute_list_routines_by_level(
             blas_level=inp.get("blas_level"),
             data_type=inp.get("data_type"),
+        ),
+        "analyze_dependencies": lambda inp: execute_analyze_dependencies(
+            routine_name=inp.get("routine_name", ""),
         ),
     }
 

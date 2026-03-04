@@ -14,10 +14,10 @@ class TestToolDefinitions:
 
         assert isinstance(TOOL_DEFINITIONS, list)
 
-    def test_has_three_tools(self):
+    def test_has_four_tools(self):
         from app.agent.tools import TOOL_DEFINITIONS
 
-        assert len(TOOL_DEFINITIONS) == 3
+        assert len(TOOL_DEFINITIONS) == 4
 
     def test_each_has_required_fields(self):
         from app.agent.tools import TOOL_DEFINITIONS
@@ -38,7 +38,7 @@ class TestToolDefinitions:
         from app.agent.tools import TOOL_DEFINITIONS
 
         names = {t["name"] for t in TOOL_DEFINITIONS}
-        assert names == {"search_codebase", "get_routine_info", "list_routines_by_level"}
+        assert names == {"search_codebase", "get_routine_info", "list_routines_by_level", "analyze_dependencies"}
 
 
 # ── search_codebase executor ──
@@ -209,9 +209,156 @@ class TestDispatchTool:
         result = dispatch_tool("list_routines_by_level", {"blas_level": "3"})
         assert "routines" in result
 
+    def test_dispatch_analyze_dependencies(self, mock_search):
+        from app.agent.tools import dispatch_tool
+
+        result = dispatch_tool("analyze_dependencies", {"routine_name": "DGEMM"})
+        assert "routine_name" in result or "error" in result
+
     def test_dispatch_unknown_returns_error(self):
         from app.agent.tools import dispatch_tool
 
         result = dispatch_tool("nonexistent_tool", {})
         assert "error" in result
         assert "Unknown tool" in result["error"]
+
+
+# ── parse_fortran_calls (pure function) ──
+
+
+class TestParseFortranCalls:
+    def test_finds_call_statements(self):
+        from app.agent.tools import parse_fortran_calls
+
+        source = """      SUBROUTINE DGEMM(TRANSA,TRANSB)
+      CALL XERBLA('DGEMM', INFO)
+      CALL DSCAL(N, ALPHA, X, INCX)
+      END"""
+        result = parse_fortran_calls(source)
+        assert "XERBLA" in result["calls"]
+        assert "DSCAL" in result["calls"]
+
+    def test_finds_external_declarations(self):
+        from app.agent.tools import parse_fortran_calls
+
+        source = """      EXTERNAL LSAME, XERBLA
+      CALL XERBLA('DGEMM', INFO)
+      END"""
+        result = parse_fortran_calls(source)
+        assert "LSAME" in result["external_refs"]
+        assert "XERBLA" in result["external_refs"]
+
+    def test_skips_comment_lines(self):
+        from app.agent.tools import parse_fortran_calls
+
+        source = """C     This is a comment with CALL FAKE
+*     Another comment CALL FAKE2
+!     Bang comment CALL FAKE3
+      CALL REAL_CALL(X)
+      END"""
+        result = parse_fortran_calls(source)
+        assert result["calls"] == ["REAL_CALL"]
+        assert "FAKE" not in result["calls"]
+
+    def test_empty_source_returns_empty(self):
+        from app.agent.tools import parse_fortran_calls
+
+        result = parse_fortran_calls("")
+        assert result["calls"] == []
+        assert result["external_refs"] == []
+
+    def test_deduplicates_calls(self):
+        from app.agent.tools import parse_fortran_calls
+
+        source = """      CALL XERBLA('A', 1)
+      CALL XERBLA('B', 2)
+      CALL XERBLA('C', 3)
+      END"""
+        result = parse_fortran_calls(source)
+        assert result["calls"].count("XERBLA") == 1
+
+    def test_case_normalized_to_upper(self):
+        from app.agent.tools import parse_fortran_calls
+
+        source = """      call xerbla('test', info)
+      external lsame
+      END"""
+        result = parse_fortran_calls(source)
+        assert "XERBLA" in result["calls"]
+        assert "LSAME" in result["external_refs"]
+
+
+# ── analyze_dependencies executor ──
+
+
+class TestExecuteAnalyzeDependencies:
+    def test_returns_dependencies(self, mock_search):
+        """Mock returns DGEMM with CALL/EXTERNAL in its source code."""
+        from app.agent.tools import execute_analyze_dependencies
+
+        # Override mock to include CALL statements in source
+        mock_search.return_value = (
+            [
+                SearchResult(
+                    chunk=CodeChunk(
+                        id="dgemm.f::DGEMM",
+                        text="      SUBROUTINE DGEMM(TRANSA)\n      EXTERNAL LSAME\n      CALL XERBLA('DGEMM', INFO)\n      END",
+                        metadata=ChunkMetadata(
+                            file_path="SRC/dgemm.f",
+                            start_line=1,
+                            end_line=50,
+                            subroutine_name="DGEMM",
+                            blas_level="3",
+                            data_type="double real",
+                        ),
+                    ),
+                    score=0.95,
+                )
+            ],
+            10.0,
+        )
+        result = execute_analyze_dependencies("DGEMM")
+        assert result["routine_name"] == "DGEMM"
+        assert "XERBLA" in result["calls"]
+        assert "LSAME" in result["external_refs"]
+        assert result["total_dependencies"] > 0
+
+    def test_empty_name_returns_error(self):
+        from app.agent.tools import execute_analyze_dependencies
+
+        result = execute_analyze_dependencies("")
+        assert "error" in result
+
+    def test_unknown_routine_returns_not_found(self, mock_search):
+        from app.agent.tools import execute_analyze_dependencies
+
+        # Mock returns non-matching routine
+        mock_search.return_value = (
+            [
+                SearchResult(
+                    chunk=CodeChunk(
+                        id="test::DGEMM",
+                        text="SUBROUTINE DGEMM",
+                        metadata=ChunkMetadata(
+                            file_path="SRC/dgemm.f",
+                            start_line=1,
+                            end_line=50,
+                            subroutine_name="DGEMM",
+                            blas_level="3",
+                            data_type="double real",
+                        ),
+                    ),
+                    score=0.5,
+                )
+            ],
+            10.0,
+        )
+        result = execute_analyze_dependencies("XYZFOO")
+        assert result.get("found") is False
+
+    def test_exception_returns_error(self):
+        from app.agent.tools import execute_analyze_dependencies
+
+        with patch("app.agent.tools.search_codebase", side_effect=Exception("fail")):
+            result = execute_analyze_dependencies("DGEMM")
+            assert "error" in result
