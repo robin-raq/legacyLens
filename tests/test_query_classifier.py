@@ -38,7 +38,7 @@ class TestClassifyQuery:
         assert classify_query("Find similar patterns to DGEMM") == QueryType.PATTERN
 
     def test_patterns_keyword(self):
-        assert classify_query("What patterns are used in error handling?") == QueryType.PATTERN
+        assert classify_query("What patterns are common across Level 3 routines?") == QueryType.PATTERN
 
     def test_similar_to_keyword(self):
         assert classify_query("Show subroutines similar to DSWAP") == QueryType.PATTERN
@@ -58,6 +58,55 @@ class TestClassifyQuery:
 
     def test_calculation_keyword(self):
         assert classify_query("What calculation does DDOT perform?") == QueryType.LOGIC
+
+    # ── Dependency Mapping ──
+    def test_dependency_keyword(self):
+        assert classify_query("What are the dependencies of DGEMM?") == QueryType.DEPENDENCY
+
+    def test_what_calls_keyword(self):
+        assert classify_query("What does DGEMM call?") == QueryType.DEPENDENCY
+
+    def test_call_graph_keyword(self):
+        assert classify_query("Show the call graph for DTRSM") == QueryType.DEPENDENCY
+
+    def test_external_keyword(self):
+        assert classify_query("What EXTERNAL declarations does DGEMV have?") == QueryType.DEPENDENCY
+
+    # ── Impact Analysis ──
+    def test_impact_keyword(self):
+        assert classify_query("What is the impact of changing XERBLA?") == QueryType.IMPACT
+
+    def test_affected_keyword(self):
+        assert classify_query("What routines are affected if DSCAL changes?") == QueryType.IMPACT
+
+    def test_what_would_break_keyword(self):
+        assert classify_query("What would break if LSAME is modified?") == QueryType.IMPACT
+
+    # ── Translation Hints ──
+    def test_modern_keyword(self):
+        assert classify_query("What is the modern equivalent of DGEMM?") == QueryType.TRANSLATION
+
+    def test_translate_keyword(self):
+        assert classify_query("How would I translate SAXPY to Python?") == QueryType.TRANSLATION
+
+    def test_numpy_keyword(self):
+        assert classify_query("What NumPy function replaces DGEMV?") == QueryType.TRANSLATION
+
+    def test_migrate_keyword(self):
+        assert classify_query("How to migrate DTRSM to modern code?") == QueryType.TRANSLATION
+
+    # ── Bug Pattern Search ──
+    def test_bug_keyword(self):
+        assert classify_query("Are there bugs in DGEMM?") == QueryType.BUG_PATTERN
+
+    def test_potential_problem_keyword(self):
+        assert classify_query("Find potential problems in DGEMV") == QueryType.BUG_PATTERN
+
+    def test_validation_keyword(self):
+        assert classify_query("Does DTRSM validate its inputs?") == QueryType.BUG_PATTERN
+
+    def test_xerbla_keyword(self):
+        assert classify_query("Which routines use XERBLA for error handling?") == QueryType.BUG_PATTERN
 
     # ── Default (general search) ──
     def test_general_query_defaults_to_explain(self):
@@ -92,6 +141,22 @@ class TestGetSearchParams:
     def test_logic_uses_top5(self):
         params = get_search_params(QueryType.LOGIC)
         assert params["top_k"] == 5
+
+    def test_dependency_uses_top5(self):
+        params = get_search_params(QueryType.DEPENDENCY)
+        assert params["top_k"] == 5
+
+    def test_impact_uses_top8(self):
+        params = get_search_params(QueryType.IMPACT)
+        assert params["top_k"] == 8
+
+    def test_translation_uses_top5(self):
+        params = get_search_params(QueryType.TRANSLATION)
+        assert params["top_k"] == 5
+
+    def test_bug_pattern_uses_top8(self):
+        params = get_search_params(QueryType.BUG_PATTERN)
+        assert params["top_k"] == 8
 
     def test_all_types_have_system_prompt(self):
         """Every query type must have a system prompt."""
