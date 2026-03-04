@@ -10,3 +10,7 @@ dist/
 build/
 walkthrough.md
 benchmark_results.json
+eval_results.json
+perf_results.json
+DEMO_VIDEO_SCRIPT.md
+DEMO_TALKING_POINTS.md

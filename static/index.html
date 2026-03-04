@@ -184,6 +184,8 @@
         #btn:hover { background: var(--green-dim); color: var(--green-bright); text-shadow: 0 0 8px var(--green-glow); }
         #btn:active { background: var(--green); color: var(--bg); }
         #btn:disabled { background: #111; color: #333; border-color: #222; cursor: not-allowed; }
+        #btn.busy { animation: pulse 1.2s ease-in-out infinite; }
+        @keyframes pulse { 0%,100% { opacity: 0.4; } 50% { opacity: 1; } }
 
         .search-hints {
             display: flex;
@@ -685,8 +687,10 @@
         const results = document.getElementById('results');
         var sessionId = null;
         var sourceCounter = 0;
+        var isSearching = false;
 
         input.addEventListener('keydown', function(e) { if (e.key === 'Enter') search(); });
+        btn.addEventListener('click', function() { search(); });
 
         function fillQuery(text) {
             input.value = text;
@@ -706,12 +710,13 @@
             input.focus();
         }
 
-        function renderSourceCards(sourcesData) {
+        function renderSourceCards(sourcesData, container) {
+            var target = container || results;
             if (!sourcesData || sourcesData.length === 0) return;
             var srcHeader = document.createElement('div');
             srcHeader.className = 'sources-header';
             srcHeader.textContent = '>> SOURCE FILES';
-            results.appendChild(srcHeader);
+            target.appendChild(srcHeader);
 
             sourcesData.forEach(function(s, i) {
                 var m = s.chunk.metadata;
@@ -744,25 +749,33 @@
                 actionsHtml += '</div>';
 
                 card.innerHTML = headerHtml + codeHtml + actionsHtml;
-                results.appendChild(card);
+                target.appendChild(card);
             });
         }
 
         async function search() {
             const query = input.value.trim();
-            if (!query) return;
+            if (!query || isSearching) return;
+            isSearching = true;
             btn.disabled = true;
+            btn.classList.add('busy');
+            btn.textContent = '[WAIT]';
             input.value = '';
 
             // Remove empty state if present
             var emptyState = results.querySelector('.empty-state');
             if (emptyState) emptyState.remove();
 
+            // Create turn container and prepend to top
+            var turn = document.createElement('div');
+            turn.className = 'turn-container';
+            results.insertBefore(turn, results.firstChild);
+
             // Show user query echo
             var userDiv = document.createElement('div');
             userDiv.className = 'user-msg';
             userDiv.innerHTML = '<span class="prompt-echo">$&gt;</span> ' + esc(query);
-            results.appendChild(userDiv);
+            turn.appendChild(userDiv);
 
             // Streaming placeholders
             var toolDiv = null;
@@ -813,7 +826,7 @@
                                     toolDiv = document.createElement('div');
                                     toolDiv.className = 'tool-calls-section';
                                     toolDiv.innerHTML = '<div class="terminal-label" style="margin-bottom:6px">&gt; TOOL CALLS:</div>';
-                                    results.appendChild(toolDiv);
+                                    turn.appendChild(toolDiv);
                                 }
                                 toolCount++;
                                 var args = Object.entries(eventData.tool_input || {}).map(function(e) { return e[0] + '="' + e[1] + '"'; }).join(', ');
@@ -821,7 +834,6 @@
                                 toolLine.className = 'tool-call';
                                 toolLine.innerHTML = '<span class="tool-name">[' + esc(eventData.tool_name) + ']</span> <span class="tool-args">' + esc(args) + '</span> <span class="score-badge" style="color:var(--amber)">...</span>';
                                 toolDiv.appendChild(toolLine);
-                                results.scrollTop = results.scrollHeight;
                                 break;
 
                             case 'tool_result':
@@ -839,11 +851,10 @@
                                     ansDiv = document.createElement('div');
                                     ansDiv.className = 'answer';
                                     ansDiv.innerHTML = '<div class="answer-label">&gt;&gt; RESPONSE</div><div class="answer-body"></div>';
-                                    results.appendChild(ansDiv);
+                                    turn.appendChild(ansDiv);
                                 }
                                 answerText += eventData.chunk;
                                 ansDiv.querySelector('.answer-body').innerHTML = formatAnswer(answerText);
-                                results.scrollTop = results.scrollHeight;
                                 break;
 
                             case 'sources':
@@ -864,26 +875,30 @@
                 var metaBar = document.createElement('div');
                 metaBar.className = 'meta-bar';
                 metaBar.innerHTML = 'QUERY COMPLETE &mdash; TIME: <span class="stat">' + queryTimeMs.toFixed(0) + 'ms</span> &mdash; SOURCES: <span class="stat">' + sourcesData.length + '</span> &mdash; TOOLS: <span class="stat">' + toolCount + '</span>';
-                results.appendChild(metaBar);
+                turn.appendChild(metaBar);
 
                 // Sources
-                renderSourceCards(sourcesData);
+                renderSourceCards(sourcesData, turn);
 
                 // Divider between turns
                 var turnDiv = document.createElement('div');
                 turnDiv.className = 'turn-divider';
                 turnDiv.textContent = '────────────────────────────────────────────';
-                results.appendChild(turnDiv);
+                turn.appendChild(turnDiv);
 
             } catch (err) {
                 var errDiv = document.createElement('div');
                 errDiv.className = 'error-msg';
                 errDiv.textContent = err.message;
-                results.appendChild(errDiv);
+                turn.appendChild(errDiv);
+            } finally {
+                isSearching = false;
+                btn.disabled = false;
+                btn.classList.remove('busy');
+                btn.textContent = '[EXEC]';
+                input.focus();
+                window.scrollTo({ top: 0, behavior: 'smooth' });
             }
-            btn.disabled = false;
-            input.focus();
-            results.scrollTop = results.scrollHeight;
         }
 
         function makeLine(text) {
