@@ -253,6 +253,40 @@
         .loading-bar {
             margin-top: 12px;
             color: var(--green-dim);
+            font-size: 18px;
+        }
+
+        .loading-bar-fill {
+            display: inline;
+        }
+
+        @keyframes fillBar {
+            0% { content: '[....................] PROCESSING'; }
+            5% { content: '[#...................] PROCESSING'; }
+            10% { content: '[##..................] PROCESSING'; }
+            15% { content: '[###.................] PROCESSING'; }
+            20% { content: '[####................] PROCESSING'; }
+            25% { content: '[#####...............] PROCESSING'; }
+            30% { content: '[######..............] PROCESSING'; }
+            35% { content: '[#######.............] PROCESSING'; }
+            40% { content: '[########............] PROCESSING'; }
+            45% { content: '[#########...........] PROCESSING'; }
+            50% { content: '[##########..........] PROCESSING'; }
+            55% { content: '[###########.........] PROCESSING'; }
+            60% { content: '[############........] PROCESSING'; }
+            65% { content: '[#############.......] PROCESSING'; }
+            70% { content: '[##############......] PROCESSING'; }
+            75% { content: '[###############.....] PROCESSING'; }
+            80% { content: '[################....] PROCESSING'; }
+            85% { content: '[#################...] PROCESSING'; }
+            90% { content: '[##################..] PROCESSING'; }
+            95% { content: '[###################.] PROCESSING'; }
+            100% { content: '[####################] PROCESSING'; }
+        }
+
+        .loading-bar-fill::after {
+            content: '[....................] PROCESSING';
+            animation: fillBar 15s linear forwards;
         }
 
         /* === Results === */
@@ -533,34 +567,7 @@
             opacity: 0.5;
         }
 
-        /* === Tool Calls === */
-        .tool-calls-section {
-            border: 1px solid var(--green-muted);
-            padding: 10px 12px;
-            margin: 8px 0;
-            font-size: 14px;
-            background: var(--bg-code);
-        }
-
-        .tool-call {
-            padding: 3px 0;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            flex-wrap: wrap;
-        }
-
-        .tool-name {
-            color: var(--cyan);
-            font-weight: bold;
-        }
-
-        .tool-args {
-            color: var(--green-dim);
-            font-size: 13px;
-        }
-
-        /* === [NEW] Button === */
+        /* === [CLR] Button === */
         #newBtn {
             padding: 8px 12px;
             background: transparent;
@@ -651,7 +658,7 @@
                     aria-label="Search the BLAS codebase"
                 />
                 <button id="btn" aria-label="Search">[EXEC]</button>
-                <button id="newBtn" aria-label="New Session" onclick="newSession()" title="Start new conversation">[NEW]</button>
+                <button id="newBtn" aria-label="Clear" onclick="clearResults()" title="Clear results">[CLR]</button>
             </div>
             <div class="search-hints">
                 <span class="hint" onclick="fillQuery('What does DGEMM do?')">&gt; Explain DGEMM</span>
@@ -685,7 +692,6 @@
         const input = document.getElementById('query');
         const btn = document.getElementById('btn');
         const results = document.getElementById('results');
-        var sessionId = null;
         var sourceCounter = 0;
         var isSearching = false;
 
@@ -698,13 +704,12 @@
             search();
         }
 
-        function newSession() {
-            sessionId = null;
+        function clearResults() {
             sourceCounter = 0;
             results.textContent = '';
             var emptyDiv = document.createElement('div');
             emptyDiv.className = 'empty-state';
-            emptyDiv.innerHTML = '<div class="empty-ascii">   ___________\n  |  _______ |\n  | |       ||\n  | | READY ||\n  | |_______||t\n  |___________|\n  /           /\n /___________/</div><p>NEW SESSION &mdash; Awaiting query...</p>';
+            emptyDiv.innerHTML = '<div class="empty-ascii">   ___________\n  |  _______ |\n  | |       ||\n  | | READY ||\n  | |_______||t\n  |___________|\n  /           /\n /___________/</div><p>CLEARED &mdash; Awaiting query...</p>';
             results.appendChild(emptyDiv);
             input.value = '';
             input.focus();
@@ -720,8 +725,11 @@
 
             sourcesData.forEach(function(s, i) {
                 var m = s.chunk.metadata;
-                var pct = (s.score * 100);
-                var scoreClass = pct >= 45 ? 'score-high' : pct >= 35 ? 'score-mid' : 'score-low';
+                // Rank-based relevance label (raw cosine scores aren't meaningful to users)
+                var scoreClass, scoreLabel;
+                if (i === 0) { scoreClass = 'score-high'; scoreLabel = 'BEST MATCH'; }
+                else if (i <= 2) { scoreClass = 'score-mid'; scoreLabel = 'RELEVANT'; }
+                else { scoreClass = 'score-low'; scoreLabel = 'RELATED'; }
                 var codeText = s.chunk.text;
                 var isLong = codeText.length > 800;
                 var id = 'source-' + (sourceCounter++);
@@ -735,7 +743,7 @@
                 headerHtml += '<span class="source-lines">L' + m.start_line + '-' + m.end_line + '</span>';
                 if (m.subroutine_name) headerHtml += '<span class="source-name">' + esc(m.subroutine_name) + '</span>';
                 if (m.blas_level !== 'unknown') headerHtml += '<span class="source-level">LVL.' + esc(m.blas_level) + '</span>';
-                headerHtml += '<span class="score-badge ' + scoreClass + '">' + pct.toFixed(1) + '%</span>';
+                headerHtml += '<span class="score-badge ' + scoreClass + '">' + scoreLabel + '</span>';
                 headerHtml += '</div>';
 
                 var codeHtml = '<div class="source-code ' + (isLong ? '' : 'expanded') + '" id="' + id + '">';
@@ -777,116 +785,122 @@
             userDiv.innerHTML = '<span class="prompt-echo">$&gt;</span> ' + esc(query);
             turn.appendChild(userDiv);
 
-            // Streaming placeholders
-            var toolDiv = null;
-            var ansDiv = null;
-            var answerText = '';
-            var sourcesData = [];
-            var toolCount = 0;
-            var queryTimeMs = 0;
+            // Show pipeline progress steps
+            var loadingDiv = document.createElement('div');
+            loadingDiv.className = 'loading-container';
+            loadingDiv.innerHTML =
+                '<div class="loading-line">QUERY RECEIVED: "' + esc(query) + '"</div>' +
+                '<div class="loading-line">EMBEDDING QUERY VIA text-embedding-3-small...</div>' +
+                '<div class="loading-line">SEARCHING PINECONE INDEX [legacylens]...</div>' +
+                '<div class="loading-line">STREAMING RESPONSE...</div>' +
+                '<div class="loading-bar"><span class="loading-bar-fill"></span></div>';
+            turn.appendChild(loadingDiv);
 
             try {
-                var body = { query: query };
-                if (sessionId) body.session_id = sessionId;
-
-                var res = await fetch('/api/chat/stream', {
+                var res = await fetch('/api/query?stream=true', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(body)
+                    body: JSON.stringify({ query: query })
                 });
 
                 if (!res.ok) throw new Error('Server error (' + res.status + ')');
 
+                // ── Read SSE stream via Fetch + ReadableStream ──
                 var reader = res.body.getReader();
                 var decoder = new TextDecoder();
                 var buffer = '';
+                var answerText = '';
+                var answerDiv = null;
+                var answerBody = null;
+                var metaBar = null;
 
                 while (true) {
-                    var chunk = await reader.read();
-                    if (chunk.done) break;
+                    var result = await reader.read();
+                    if (result.done) break;
 
-                    buffer += decoder.decode(chunk.value, { stream: true });
+                    buffer += decoder.decode(result.value, { stream: true });
+
+                    // SSE events are separated by \n\n
                     var parts = buffer.split('\n\n');
                     buffer = parts.pop(); // keep incomplete event in buffer
 
-                    for (var raw of parts) {
-                        if (!raw.trim()) continue;
-                        var eventMatch = raw.match(/^event:\s*(\w+)\ndata:\s*(.+)$/s);
-                        if (!eventMatch) continue;
-                        var eventType = eventMatch[1];
-                        var eventData = JSON.parse(eventMatch[2]);
+                    for (var i = 0; i < parts.length; i++) {
+                        var eventStr = parts[i].trim();
+                        if (!eventStr) continue;
 
-                        switch (eventType) {
-                            case 'session':
-                                sessionId = eventData.session_id;
-                                break;
+                        // Parse "event: <type>\ndata: <json>"
+                        var eventType = '';
+                        var eventData = '';
+                        var lines = eventStr.split('\n');
+                        for (var j = 0; j < lines.length; j++) {
+                            if (lines[j].startsWith('event: ')) eventType = lines[j].substring(7);
+                            else if (lines[j].startsWith('data: ')) eventData = lines[j].substring(6);
+                        }
+                        if (!eventType || !eventData) continue;
+                        var payload = JSON.parse(eventData);
 
-                            case 'tool_start':
-                                if (!toolDiv) {
-                                    toolDiv = document.createElement('div');
-                                    toolDiv.className = 'tool-calls-section';
-                                    toolDiv.innerHTML = '<div class="terminal-label" style="margin-bottom:6px">&gt; TOOL CALLS:</div>';
-                                    turn.appendChild(toolDiv);
+                        if (eventType === 'sources') {
+                            // Sources arrive first — remove loading, render cards
+                            if (loadingDiv && loadingDiv.parentNode) loadingDiv.remove();
+
+                            // Create answer container with blinking cursor
+                            answerDiv = document.createElement('div');
+                            answerDiv.className = 'answer';
+                            answerDiv.innerHTML = '<div class="answer-label">&gt;&gt; RESPONSE</div>'
+                                + '<div class="answer-body"><span class="cursor"></span></div>';
+                            answerBody = answerDiv.querySelector('.answer-body');
+                            turn.appendChild(answerDiv);
+
+                            // Meta bar (total time filled in on "done")
+                            metaBar = document.createElement('div');
+                            metaBar.className = 'meta-bar';
+                            metaBar.innerHTML = 'MODE: <span class="stat">'
+                                + esc(payload.query_type || 'explain').toUpperCase()
+                                + '</span> &mdash; SEARCH: <span class="stat">'
+                                + (payload.search_time_ms || 0).toFixed(0)
+                                + 'ms</span> &mdash; SOURCES: <span class="stat">'
+                                + (payload.sources || []).length
+                                + '</span><span class="meta-total"></span>';
+                            turn.appendChild(metaBar);
+
+                            // Source cards
+                            renderSourceCards(payload.sources || [], turn);
+
+                        } else if (eventType === 'token') {
+                            // Append token and re-render markdown
+                            answerText += payload.content;
+                            if (answerBody) {
+                                answerBody.innerHTML = formatAnswer(answerText)
+                                    + '<span class="cursor"></span>';
+                            }
+
+                        } else if (eventType === 'done') {
+                            // Remove blinking cursor, show final answer
+                            if (answerBody) {
+                                answerBody.innerHTML = answerText
+                                    ? formatAnswer(answerText)
+                                    : '<span style="color:var(--green-dim)">No results found.</span>';
+                            }
+                            // Append total time to meta bar
+                            if (metaBar && payload.total_time_ms) {
+                                var totalSpan = metaBar.querySelector('.meta-total');
+                                if (totalSpan) {
+                                    totalSpan.innerHTML = ' &mdash; TOTAL: <span class="stat">'
+                                        + payload.total_time_ms.toFixed(0) + 'ms</span>';
                                 }
-                                toolCount++;
-                                var args = Object.entries(eventData.tool_input || {}).map(function(e) { return e[0] + '="' + e[1] + '"'; }).join(', ');
-                                var toolLine = document.createElement('div');
-                                toolLine.className = 'tool-call';
-                                toolLine.innerHTML = '<span class="tool-name">[' + esc(eventData.tool_name) + ']</span> <span class="tool-args">' + esc(args) + '</span> <span class="score-badge" style="color:var(--amber)">...</span>';
-                                toolDiv.appendChild(toolLine);
-                                break;
-
-                            case 'tool_result':
-                                var lastBadge = toolDiv ? toolDiv.querySelector('.tool-call:last-child .score-badge') : null;
-                                if (lastBadge) {
-                                    var isErr = eventData.status === 'error';
-                                    lastBadge.className = 'score-badge ' + (isErr ? 'score-low' : 'score-high');
-                                    lastBadge.textContent = isErr ? 'ERR' : 'OK';
-                                    lastBadge.style.color = '';
-                                }
-                                break;
-
-                            case 'text_delta':
-                                if (!ansDiv) {
-                                    ansDiv = document.createElement('div');
-                                    ansDiv.className = 'answer';
-                                    ansDiv.innerHTML = '<div class="answer-label">&gt;&gt; RESPONSE</div><div class="answer-body"></div>';
-                                    turn.appendChild(ansDiv);
-                                }
-                                answerText += eventData.chunk;
-                                ansDiv.querySelector('.answer-body').innerHTML = formatAnswer(answerText);
-                                break;
-
-                            case 'sources':
-                                sourcesData = eventData;
-                                break;
-
-                            case 'done':
-                                queryTimeMs = eventData.query_time_ms;
-                                break;
-
-                            case 'error':
-                                throw new Error(eventData.message || 'Stream error');
+                            }
                         }
                     }
                 }
 
-                // Meta bar
-                var metaBar = document.createElement('div');
-                metaBar.className = 'meta-bar';
-                metaBar.innerHTML = 'QUERY COMPLETE &mdash; TIME: <span class="stat">' + queryTimeMs.toFixed(0) + 'ms</span> &mdash; SOURCES: <span class="stat">' + sourcesData.length + '</span> &mdash; TOOLS: <span class="stat">' + toolCount + '</span>';
-                turn.appendChild(metaBar);
-
-                // Sources
-                renderSourceCards(sourcesData, turn);
-
-                // Divider between turns
+                // Divider
                 var turnDiv = document.createElement('div');
                 turnDiv.className = 'turn-divider';
                 turnDiv.textContent = '────────────────────────────────────────────';
                 turn.appendChild(turnDiv);
 
             } catch (err) {
+                if (loadingDiv && loadingDiv.parentNode) loadingDiv.remove();
                 var errDiv = document.createElement('div');
                 errDiv.className = 'error-msg';
                 errDiv.textContent = err.message;
@@ -899,13 +913,6 @@
                 input.focus();
                 window.scrollTo({ top: 0, behavior: 'smooth' });
             }
-        }
-
-        function makeLine(text) {
-            var el = document.createElement('div');
-            el.className = 'loading-line';
-            el.textContent = text;
-            return el;
         }
 
         function toggleExpand(id, button) {
