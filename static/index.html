@@ -655,6 +655,7 @@
                     id="query"
                     placeholder="ask about BLAS subroutines..."
                     autofocus
+                    maxlength="2000"
                     aria-label="Search the BLAS codebase"
                 />
                 <button id="btn" aria-label="Search">[EXEC]</button>
@@ -694,6 +695,7 @@
         const results = document.getElementById('results');
         var sourceCounter = 0;
         var isSearching = false;
+        var sessionId = null;
 
         input.addEventListener('keydown', function(e) { if (e.key === 'Enter') search(); });
         btn.addEventListener('click', function() { search(); });
@@ -706,6 +708,7 @@
 
         function clearResults() {
             sourceCounter = 0;
+            sessionId = null;
             results.textContent = '';
             var emptyDiv = document.createElement('div');
             emptyDiv.className = 'empty-state';
@@ -753,10 +756,15 @@
 
                 var actionsHtml = '<div class="source-actions">';
                 if (isLong) actionsHtml += '<button class="action-btn" onclick="toggleExpand(\'' + id + '\', this)">[MORE]</button>';
-                actionsHtml += '<button class="action-btn" onclick="copyCode(this, ' + JSON.stringify(codeText).replace(/'/g, "\\'") + ')">[COPY]</button>';
+                actionsHtml += '<button class="action-btn copy-btn">[COPY]</button>';
                 actionsHtml += '</div>';
 
                 card.innerHTML = headerHtml + codeHtml + actionsHtml;
+                // Attach copy handler safely (avoids JSON in onclick breaking HTML attributes)
+                var copyBtn = card.querySelector('.copy-btn');
+                copyBtn.addEventListener('click', (function(text) {
+                    return function() { copyCode(this, text); };
+                })(codeText));
                 target.appendChild(card);
             });
         }
@@ -797,7 +805,8 @@
             turn.appendChild(loadingDiv);
 
             try {
-                var res = await fetch('/api/query?stream=true', {
+                var streamUrl = '/api/query?stream=true' + (sessionId ? '&session_id=' + encodeURIComponent(sessionId) : '');
+                var res = await fetch(streamUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ query: query })
@@ -840,6 +849,9 @@
                         var payload = JSON.parse(eventData);
 
                         if (eventType === 'sources') {
+                            // Track session for conversation memory
+                            if (payload.session_id) sessionId = payload.session_id;
+
                             // Sources arrive first — remove loading, render cards
                             if (loadingDiv && loadingDiv.parentNode) loadingDiv.remove();
 
@@ -872,6 +884,13 @@
                             if (answerBody) {
                                 answerBody.innerHTML = formatAnswer(answerText)
                                     + '<span class="cursor"></span>';
+                            }
+
+                        } else if (eventType === 'error') {
+                            // Server-side error during streaming
+                            if (answerBody) {
+                                answerBody.innerHTML = '<span style="color:#ff6b6b">[ERROR] '
+                                    + esc(payload.message || 'Unknown error') + '</span>';
                             }
 
                         } else if (eventType === 'done') {
