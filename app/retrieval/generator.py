@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import Iterator
 
 from app.config import settings
 from app.retrieval.query_classifier import QueryType, get_search_params
+
+logger = logging.getLogger(__name__)
 
 # ── Lazy client initialisation ──
 # Clients are created on first use so missing API keys for the unused
@@ -21,7 +24,7 @@ def _get_anthropic_client():
     if _anthropic_client is None:
         import anthropic
         _anthropic_client = anthropic.Anthropic(
-            api_key=settings.anthropic_api_key, timeout=60.0
+            api_key=settings.anthropic_api_key, timeout=settings.llm_timeout
         )
     return _anthropic_client
 
@@ -110,24 +113,36 @@ Explain the Fortran code, then map it to modern languages (NumPy/SciPy, Eigen). 
 Look for: off-by-one errors, missing validation, uninitialized vars, overflow risks. Reference file:line.""",
 }
 
+_ERROR_MSG = "Sorry, an error occurred while generating the answer. Please try again."
 
 # ── Generation backends ──
 
+_MAX_RETRIES = settings.max_retries
+_RETRY_DELAY = settings.retry_delay
+
 
 def _generate_anthropic(system_prompt: str, user_message: str) -> str:
-    """Generate answer via Anthropic Claude."""
+    """Generate answer via Anthropic Claude with retry on rate limits."""
+    import anthropic
     client = _get_anthropic_client()
-    response = client.messages.create(
-        model=settings.anthropic_model,
-        max_tokens=2000,
-        system=system_prompt,
-        messages=[{"role": "user", "content": user_message}],
-    )
-    return response.content[0].text
 
-
-_MAX_RETRIES = 3
-_RETRY_DELAY = 4.0  # seconds, matches Gemini's retry hint
+    for attempt in range(_MAX_RETRIES):
+        try:
+            response = client.messages.create(
+                model=settings.anthropic_model,
+                max_tokens=settings.max_tokens,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_message}],
+            )
+            return response.content[0].text
+        except anthropic.RateLimitError:
+            if attempt < _MAX_RETRIES - 1:
+                delay = _RETRY_DELAY * (attempt + 1)
+                logger.warning("Anthropic rate limit, retrying in %.1fs (attempt %d/%d)",
+                               delay, attempt + 1, _MAX_RETRIES)
+                time.sleep(delay)
+                continue
+            raise
 
 
 def _generate_gemini(system_prompt: str, user_message: str) -> str:
@@ -143,7 +158,7 @@ def _generate_gemini(system_prompt: str, user_message: str) -> str:
                 contents=user_message,
                 config=types.GenerateContentConfig(
                     system_instruction=system_prompt,
-                    max_output_tokens=2000,
+                    max_output_tokens=settings.max_tokens,
                     thinking_config=types.ThinkingConfig(thinking_budget=0),
                 ),
             )
@@ -156,15 +171,27 @@ def _generate_gemini(system_prompt: str, user_message: str) -> str:
 
 
 def _stream_anthropic(system_prompt: str, user_message: str) -> Iterator[str]:
-    """Stream answer via Anthropic Claude."""
+    """Stream answer via Anthropic Claude with retry on rate limits."""
+    import anthropic
     client = _get_anthropic_client()
-    with client.messages.stream(
-        model=settings.anthropic_model,
-        max_tokens=2000,
-        system=system_prompt,
-        messages=[{"role": "user", "content": user_message}],
-    ) as stream:
-        yield from stream.text_stream
+
+    for attempt in range(_MAX_RETRIES):
+        try:
+            with client.messages.stream(
+                model=settings.anthropic_model,
+                max_tokens=settings.max_tokens,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_message}],
+            ) as stream:
+                yield from stream.text_stream
+            return  # Success
+        except anthropic.RateLimitError:
+            if attempt < _MAX_RETRIES - 1:
+                delay = _RETRY_DELAY * (attempt + 1)
+                logger.warning("Anthropic stream rate limit, retrying in %.1fs", delay)
+                time.sleep(delay)
+                continue
+            raise
 
 
 def _stream_gemini(system_prompt: str, user_message: str) -> Iterator[str]:
@@ -180,7 +207,7 @@ def _stream_gemini(system_prompt: str, user_message: str) -> Iterator[str]:
                 contents=user_message,
                 config=types.GenerateContentConfig(
                     system_instruction=system_prompt,
-                    max_output_tokens=2000,
+                    max_output_tokens=settings.max_tokens,
                     thinking_config=types.ThinkingConfig(thinking_budget=0),
                 ),
             )
@@ -208,26 +235,40 @@ def _build_prompt(query: str, context: str, query_type: QueryType) -> tuple[str,
 
 
 def generate_answer(
-    query: str, context: str, query_type: QueryType = QueryType.EXPLAIN
+    query: str, context: str, query_type: QueryType = QueryType.EXPLAIN,
+    history: list[dict] | None = None,
 ) -> str:
-    """Generate an answer using the configured LLM provider."""
+    """Generate an answer using the configured LLM provider.
+
+    Returns a user-friendly error message on failure instead of crashing.
+    """
     system_prompt, user_message = _build_prompt(query, context, query_type)
 
-    if settings.llm_provider == "gemini":
-        return _generate_gemini(system_prompt, user_message)
-    return _generate_anthropic(system_prompt, user_message)
+    try:
+        if settings.llm_provider == "gemini":
+            return _generate_gemini(system_prompt, user_message)
+        return _generate_anthropic(system_prompt, user_message)
+    except Exception as e:
+        logger.error("Answer generation failed: %s", e)
+        return _ERROR_MSG
 
 
 def generate_answer_stream(
-    query: str, context: str, query_type: QueryType = QueryType.EXPLAIN
+    query: str, context: str, query_type: QueryType = QueryType.EXPLAIN,
+    history: list[dict] | None = None,
 ) -> Iterator[str]:
     """Stream an answer using the configured LLM provider.
 
     Yields text deltas as they arrive from the API.
+    On failure, yields an error message instead of crashing.
     """
     system_prompt, user_message = _build_prompt(query, context, query_type)
 
-    if settings.llm_provider == "gemini":
-        yield from _stream_gemini(system_prompt, user_message)
-    else:
-        yield from _stream_anthropic(system_prompt, user_message)
+    try:
+        if settings.llm_provider == "gemini":
+            yield from _stream_gemini(system_prompt, user_message)
+        else:
+            yield from _stream_anthropic(system_prompt, user_message)
+    except Exception as e:
+        logger.error("Streaming generation failed: %s", e)
+        yield _ERROR_MSG

@@ -2,6 +2,7 @@
 
 import re
 import time
+from app.config import settings
 from app.embeddings.openai_embed import embed_query
 from app.vectordb.pinecone_client import search as pinecone_search
 from app.models import CodeChunk, ChunkMetadata, SearchResult
@@ -32,8 +33,8 @@ _KNOWN_BLAS_NAMES.update(_UTILITY_NAMES)
 
 _ROUTINE_PATTERN = re.compile(r"\b([A-Z][A-Z0-9]{3,})\b")
 
-EXACT_MATCH_BOOST = 2.0
-SCORE_GAP_RATIO = 0.6  # keep results scoring ≥ 60% of the top result
+EXACT_MATCH_BOOST = settings.exact_match_boost
+SCORE_GAP_RATIO = settings.score_gap_ratio
 
 
 _LEVEL_PATTERN = re.compile(r"\blevel\s+([1-3])\b", re.IGNORECASE)
@@ -101,8 +102,10 @@ def filter_by_score_gap(
 # ── Search pipeline ──
 
 
-def search_codebase(query: str, top_k: int = 5, threshold: float = 0.2) -> tuple[list[SearchResult], float]:
+def search_codebase(query: str, top_k: int = 5, threshold: float = None) -> tuple[list[SearchResult], float]:
     """Search the codebase and return re-ranked results with timing."""
+    if threshold is None:
+        threshold = settings.score_threshold
     start = time.time()
 
     # Embed the query
@@ -144,7 +147,7 @@ def search_codebase(query: str, top_k: int = 5, threshold: float = 0.2) -> tuple
     return results, elapsed_ms
 
 
-def build_context(results: list[SearchResult], max_chars: int = 30000) -> str:
+def build_context(results: list[SearchResult], max_chars: int = None) -> str:
     """Assemble retrieved chunks into a context string for the LLM.
 
     Args:
@@ -153,6 +156,8 @@ def build_context(results: list[SearchResult], max_chars: int = 30000) -> str:
                    Prevents exceeding model context windows and reduces latency.
                    The first source is always included even if it exceeds the limit.
     """
+    if max_chars is None:
+        max_chars = settings.context_max_chars
     separator = "\n\n---\n\n"
     parts = []
     total_len = 0
