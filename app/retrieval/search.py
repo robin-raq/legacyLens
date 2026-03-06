@@ -3,33 +3,13 @@
 import re
 import time
 from app.config import settings
+from app.constants import KNOWN_BLAS_NAMES
 from app.embeddings.openai_embed import embed_query
 from app.vectordb.pinecone_client import search as pinecone_search
 from app.models import CodeChunk, ChunkMetadata, SearchResult
 
 
 # ── Routine name extraction for re-ranking ──
-
-_BLAS_PREFIXES = ["S", "D", "C", "Z"]
-_BLAS_OPS = [
-    # Level 1
-    "ROTG", "ROT", "ROTMG", "ROTM", "SWAP", "SCAL", "COPY", "AXPY",
-    "DOT", "DOTU", "DOTC", "NRM2", "ASUM", "AMAX", "IAMAX", "AXPBY",
-    # Level 2
-    "GEMV", "GBMV", "HEMV", "HBMV", "HPMV", "SYMV", "SBMV", "SPMV",
-    "TRMV", "TBMV", "TPMV", "TRSV", "TBSV", "TPSV", "GER", "GERU",
-    "GERC", "HER", "HPR", "HER2", "HPR2", "SYR", "SPR", "SYR2", "SPR2",
-    # Level 3
-    "GEMM", "SYMM", "HEMM", "SYRK", "HERK", "SYR2K", "HER2K",
-    "TRMM", "TRSM", "GEMMTR",
-]
-_UTILITY_NAMES = {"XERBLA", "XERBLA_ARRAY", "LSAME"}
-
-_KNOWN_BLAS_NAMES: set[str] = set()
-for _pfx in _BLAS_PREFIXES:
-    for _op in _BLAS_OPS:
-        _KNOWN_BLAS_NAMES.add(_pfx + _op)
-_KNOWN_BLAS_NAMES.update(_UTILITY_NAMES)
 
 _ROUTINE_PATTERN = re.compile(r"\b([A-Z][A-Z0-9]{3,})\b")
 
@@ -55,7 +35,7 @@ def extract_routine_names(query: str) -> set[str]:
     """Extract BLAS routine names mentioned in a query string."""
     upper_query = query.upper()
     candidates = set(_ROUTINE_PATTERN.findall(upper_query))
-    return candidates & _KNOWN_BLAS_NAMES
+    return candidates & KNOWN_BLAS_NAMES
 
 
 def rerank_results(
