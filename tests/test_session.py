@@ -1,6 +1,6 @@
 """Tests for lightweight conversation memory (session store)."""
 
-import time
+from unittest.mock import patch
 import pytest
 from app.session import SessionStore
 
@@ -79,8 +79,37 @@ class TestSessionLimits:
 
 class TestSessionExpiry:
     def test_expired_session_returns_none(self):
-        store = SessionStore(ttl=1)  # 1 second TTL
-        sid = store.create_session()
-        store.add_turn(sid, "Q", "A")
-        time.sleep(1.1)
-        assert store.get_messages(sid) is None
+        """Mock time.time() to avoid flaky sleep-based tests."""
+        fake_time = 1000.0
+
+        def _time():
+            return fake_time
+
+        with patch("app.session.time") as mock_time:
+            mock_time.time = _time
+            store = SessionStore(ttl=10)
+            sid = store.create_session()
+            store.add_turn(sid, "Q", "A")
+
+            # Advance clock past TTL
+            fake_time = 1011.0
+            assert store.get_messages(sid) is None
+
+    def test_not_expired_within_ttl(self):
+        """Session should still be accessible within TTL."""
+        fake_time = 1000.0
+
+        def _time():
+            return fake_time
+
+        with patch("app.session.time") as mock_time:
+            mock_time.time = _time
+            store = SessionStore(ttl=10)
+            sid = store.create_session()
+            store.add_turn(sid, "Q", "A")
+
+            # Advance clock but stay within TTL
+            fake_time = 1005.0
+            msgs = store.get_messages(sid)
+            assert msgs is not None
+            assert len(msgs) == 2
