@@ -5,9 +5,13 @@ Extracts rich metadata from BLAS file headers (Purpose, params).
 Falls back to fixed-size chunking for files that don't match.
 """
 
+import logging
 import re
 from pathlib import Path
 from app.models import CodeChunk, ChunkMetadata
+from app.constants import DATA_TYPE_MAP, BLAS_LEVELS
+
+logger = logging.getLogger(__name__)
 
 # Matches start of a subroutine or function (Fortran 77 and 90 style)
 _START_PATTERN = re.compile(
@@ -23,30 +27,11 @@ _END_PATTERN = re.compile(
     re.IGNORECASE | re.MULTILINE,
 )
 
-# BLAS naming convention for data type prefix
-_DATA_TYPE_MAP = {
-    "S": "single real",
-    "D": "double real",
-    "C": "single complex",
-    "Z": "double complex",
-}
-
-# BLAS level detection from filename patterns
-_BLAS_LEVELS = {
-    "1": ["ROTG", "ROT", "ROTMG", "ROTM", "SWAP", "SCAL", "COPY", "AXPY",
-           "DOT", "DOTU", "DOTC", "NRM2", "ASUM", "AMAX", "IAMAX"],
-    "2": ["GEMV", "GBMV", "HEMV", "HBMV", "HPMV", "SYMV", "SBMV", "SPMV",
-           "TRMV", "TBMV", "TPMV", "TRSV", "TBSV", "TPSV", "GER", "GERU",
-           "GERC", "HER", "HPR", "HER2", "HPR2", "SYR", "SPR", "SYR2", "SPR2"],
-    "3": ["GEMM", "SYMM", "HEMM", "SYRK", "HERK", "SYR2K", "HER2K",
-           "TRMM", "TRSM"],
-}
-
 
 def _detect_data_type(name: str) -> str:
     """Detect data type from BLAS naming convention (first char)."""
-    if name and name[0].upper() in _DATA_TYPE_MAP:
-        return _DATA_TYPE_MAP[name[0].upper()]
+    if name and name[0].upper() in DATA_TYPE_MAP:
+        return DATA_TYPE_MAP[name[0].upper()]
     return "unknown"
 
 
@@ -54,7 +39,7 @@ def _detect_blas_level(name: str) -> str:
     """Detect BLAS level (1, 2, or 3) from subroutine name."""
     upper = name.upper()
     suffix = upper[1:] if len(upper) > 1 else ""
-    for level, ops in _BLAS_LEVELS.items():
+    for level, ops in BLAS_LEVELS.items():
         for op in ops:
             if suffix == op or suffix.startswith(op):
                 return level
@@ -193,7 +178,8 @@ def chunk_fortran_file(file_path: Path, source_dir: str) -> list[CodeChunk]:
     """
     try:
         content = file_path.read_text(encoding="utf-8", errors="replace")
-    except Exception:
+    except Exception as e:
+        logger.warning("Failed to read %s: %s", file_path, e)
         return []
 
     lines = content.split("\n")

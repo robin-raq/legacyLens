@@ -14,3 +14,17 @@ eval_results.json
 perf_results.json
 DEMO_VIDEO_SCRIPT.md
 DEMO_TALKING_POINTS.md
+ai_interview_script_mvp.md
+ai_interview_script_simple_rag.md
+
+# Working artifacts & tooling
+.agents/
+.claude/
+skills-lock.json
+firebase-debug.log
+PERFORMANCE_TARGETS.md
+PLAN_NO_TOOLS.md
+eval_results_*.json
+scripts/.perf_results/
+scripts/perf_compare.py
+scripts/perf_test.py

@@ -20,6 +20,10 @@ python scripts/ingest.py
 
 # Tests
 pytest
+
+# RAG evaluation (24 queries across 8 features — requires running server)
+python scripts/eval.py
+python scripts/eval.py --url https://legacylens-production-fd39.up.railway.app
 ```
 
 ## Required Environment Variables (.env)
@@ -40,8 +44,9 @@ The system follows a RAG pipeline: **Ingest → Embed → Store → Retrieve →
 4. **Vector DB** (`app/vectordb/pinecone_client.py`) — upserts vectors + metadata to Pinecone
 
 ### Query Pipeline (runtime, `app/api/routes.py` → POST `/api/query`)
-1. **Search** (`app/retrieval/search.py`) — embeds query → searches Pinecone → filters by score threshold (0.2) → assembles context string
-2. **Generator** (`app/retrieval/generator.py`) — sends context + query to Claude with a BLAS-expert system prompt
+1. **Classifier** (`app/retrieval/query_classifier.py`) — regex-based routing to one of 8 query types: EXPLAIN, DOCUMENT, PATTERN, LOGIC, DEPENDENCY, IMPACT, TRANSLATION, BUG_PATTERN. Each type has its own system prompt and search parameters (top_k).
+2. **Search** (`app/retrieval/search.py`) — embeds query → searches Pinecone → filters by score threshold (0.2) → assembles context string
+3. **Generator** (`app/retrieval/generator.py`) — sends context + query to Claude with the feature-specific system prompt selected by the classifier
 
 ### Frontend
 Single-page app at `static/index.html` — dark-themed UI with inline CSS/JS, manual Fortran syntax highlighting, expandable source cards.
@@ -49,7 +54,7 @@ Single-page app at `static/index.html` — dark-themed UI with inline CSS/JS, ma
 ### API Endpoints
 - `GET /` — serves the frontend
 - `GET /api/health` — health check
-- `POST /api/query` — accepts `{ "query": "..." }`, returns `{ answer, sources, query_time_ms }`
+- `POST /api/query` — accepts `{ "query": "..." }`, returns `{ answer, sources, query_type, query_time_ms }`
 
 ## Development Rules
 

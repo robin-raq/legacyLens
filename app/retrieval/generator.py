@@ -1,12 +1,45 @@
-"""Answer generation using Claude with feature-specific system prompts."""
+"""Answer generation using Claude or Gemini with feature-specific system prompts."""
 
-import anthropic
+from __future__ import annotations
+
+import logging
+import time
+from typing import Callable, Iterator
+
 from app.config import settings
 from app.retrieval.query_classifier import QueryType, get_search_params
+from app.utils import retry_on_rate_limit
 
-_client = anthropic.Anthropic(api_key=settings.anthropic_api_key, timeout=60.0)
+logger = logging.getLogger(__name__)
 
-# User message templates per feature
+# ── Lazy client initialisation ──
+# Clients are created on first use so missing API keys for the unused
+# provider don't crash the app at import time.
+
+_anthropic_client = None
+_gemini_client = None
+
+
+def _get_anthropic_client():
+    global _anthropic_client
+    if _anthropic_client is None:
+        import anthropic
+        _anthropic_client = anthropic.Anthropic(
+            api_key=settings.anthropic_api_key, timeout=settings.llm_timeout
+        )
+    return _anthropic_client
+
+
+def _get_gemini_client():
+    global _gemini_client
+    if _gemini_client is None:
+        from google import genai
+        _gemini_client = genai.Client(api_key=settings.google_api_key)
+    return _gemini_client
+
+
+# ── User message templates per feature ──
+
 _USER_TEMPLATES = {
     QueryType.EXPLAIN: """Based on the following retrieved BLAS source code, answer this question:
 
@@ -43,20 +76,204 @@ Group similar subroutines, identify shared patterns, and explain variations.""",
 {context}
 
 Focus on the mathematical formula, algorithm steps, special cases, and computational complexity.""",
+
+    QueryType.DEPENDENCY: """Analyze the dependencies and call structure of:
+
+**Request:** {query}
+
+**Retrieved Code:**
+{context}
+
+Extract CALL statements, EXTERNAL declarations, and explain the data flow between routines.""",
+
+    QueryType.IMPACT: """Analyze the potential impact of changes to:
+
+**Request:** {query}
+
+**Retrieved Code:**
+{context}
+
+Identify callers and callees. Explain upstream and downstream impact if this code changes.""",
+
+    QueryType.TRANSLATION: """Suggest modern equivalents for:
+
+**Request:** {query}
+
+**Retrieved Code:**
+{context}
+
+Explain the Fortran code, then map it to modern languages (NumPy/SciPy, Eigen). Note Fortran idioms.""",
+
+    QueryType.BUG_PATTERN: """Analyze the following code for potential issues:
+
+**Request:** {query}
+
+**Retrieved Code:**
+{context}
+
+Look for: off-by-one errors, missing validation, uninitialized vars, overflow risks. Reference file:line.""",
 }
 
+_ERROR_MSG = "Sorry, an error occurred while generating the answer. Please try again."
 
-def generate_answer(query: str, context: str, query_type: QueryType = QueryType.EXPLAIN) -> str:
-    """Generate an answer using Claude with a feature-specific system prompt."""
+# ── Generation backends ──
+
+_MAX_RETRIES = settings.max_retries
+_RETRY_DELAY = settings.retry_delay
+
+
+def _generate_anthropic(system_prompt: str, user_message: str) -> str:
+    """Generate answer via Anthropic Claude with retry on rate limits."""
+    import anthropic
+
+    def _call():
+        client = _get_anthropic_client()
+        response = client.messages.create(
+            model=settings.anthropic_model,
+            max_tokens=settings.max_tokens,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_message}],
+        )
+        return response.content[0].text
+
+    return retry_on_rate_limit(_call, exc_type=anthropic.RateLimitError)
+
+
+def _generate_gemini(system_prompt: str, user_message: str) -> str:
+    """Generate answer via Google Gemini, with retry on rate-limit errors."""
+    from google.genai import types
+    from google.genai.errors import ClientError
+
+    def _call():
+        client = _get_gemini_client()
+        response = client.models.generate_content(
+            model=settings.gemini_model,
+            contents=user_message,
+            config=types.GenerateContentConfig(
+                system_instruction=system_prompt,
+                max_output_tokens=settings.max_tokens,
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
+            ),
+        )
+        return response.text
+
+    return retry_on_rate_limit(_call, exc_type=ClientError, exc_match="429")
+
+
+def _stream_with_retry(
+    stream_factory: Callable[[], Iterator[str]],
+    exc_type: type[Exception],
+    exc_match: str | None = None,
+) -> Iterator[str]:
+    """Retry wrapper for streaming generators.
+
+    ``retry_on_rate_limit`` can't wrap generators because ``yield from``
+    inside a ``try`` block has special PEP 479 semantics.  This helper
+    accepts a *factory* that produces a fresh iterator on each attempt.
+    """
+    for attempt in range(_MAX_RETRIES):
+        try:
+            yield from stream_factory()
+            return  # Success — full stream consumed
+        except exc_type as e:
+            if exc_match and exc_match not in str(e):
+                raise
+            if attempt < _MAX_RETRIES - 1:
+                wait = _RETRY_DELAY * (attempt + 1)
+                logger.warning(
+                    "Stream rate limit, retrying in %.1fs (attempt %d/%d)",
+                    wait, attempt + 1, _MAX_RETRIES,
+                )
+                time.sleep(wait)
+                continue
+            raise
+
+
+def _stream_anthropic(system_prompt: str, user_message: str) -> Iterator[str]:
+    """Stream answer via Anthropic Claude with retry on rate limits."""
+    import anthropic
+    client = _get_anthropic_client()
+
+    def _stream():
+        with client.messages.stream(
+            model=settings.anthropic_model,
+            max_tokens=settings.max_tokens,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_message}],
+        ) as stream:
+            yield from stream.text_stream
+
+    yield from _stream_with_retry(_stream, exc_type=anthropic.RateLimitError)
+
+
+def _stream_gemini(system_prompt: str, user_message: str) -> Iterator[str]:
+    """Stream answer via Google Gemini, with retry on rate-limit errors."""
+    from google.genai import types
+    from google.genai.errors import ClientError
+    client = _get_gemini_client()
+
+    def _stream():
+        response = client.models.generate_content_stream(
+            model=settings.gemini_model,
+            contents=user_message,
+            config=types.GenerateContentConfig(
+                system_instruction=system_prompt,
+                max_output_tokens=settings.max_tokens,
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
+            ),
+        )
+        for chunk in response:
+            if chunk.text:
+                yield chunk.text
+
+    yield from _stream_with_retry(_stream, exc_type=ClientError, exc_match="429")
+
+
+# ── Public API ──
+
+
+def _build_prompt(query: str, context: str, query_type: QueryType) -> tuple[str, str]:
+    """Build system prompt and user message for a given query type."""
     params = get_search_params(query_type)
     system_prompt = params["system_prompt"]
     user_template = _USER_TEMPLATES[query_type]
     user_message = user_template.format(query=query, context=context)
+    return system_prompt, user_message
 
-    response = _client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=2000,
-        system=system_prompt,
-        messages=[{"role": "user", "content": user_message}],
-    )
-    return response.content[0].text
+
+def generate_answer(
+    query: str, context: str, query_type: QueryType = QueryType.EXPLAIN,
+) -> str:
+    """Generate an answer using the configured LLM provider.
+
+    Returns a user-friendly error message on failure instead of crashing.
+    """
+    system_prompt, user_message = _build_prompt(query, context, query_type)
+
+    try:
+        if settings.llm_provider == "gemini":
+            return _generate_gemini(system_prompt, user_message)
+        return _generate_anthropic(system_prompt, user_message)
+    except Exception as e:
+        logger.error("Answer generation failed: %s", e)
+        return _ERROR_MSG
+
+
+def generate_answer_stream(
+    query: str, context: str, query_type: QueryType = QueryType.EXPLAIN,
+) -> Iterator[str]:
+    """Stream an answer using the configured LLM provider.
+
+    Yields text deltas as they arrive from the API.
+    On failure, yields an error message instead of crashing.
+    """
+    system_prompt, user_message = _build_prompt(query, context, query_type)
+
+    try:
+        if settings.llm_provider == "gemini":
+            yield from _stream_gemini(system_prompt, user_message)
+        else:
+            yield from _stream_anthropic(system_prompt, user_message)
+    except Exception as e:
+        logger.error("Streaming generation failed: %s", e)
+        yield _ERROR_MSG

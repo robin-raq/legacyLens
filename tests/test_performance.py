@@ -129,9 +129,10 @@ class TestTimeoutConfig:
         assert _client.timeout is not None
 
     def test_anthropic_timeout_configured(self):
-        """Anthropic client has explicit timeout."""
-        from app.retrieval.generator import _client
-        assert _client.timeout is not None
+        """Anthropic client (lazy-init) has explicit timeout."""
+        from app.retrieval.generator import _get_anthropic_client
+        client = _get_anthropic_client()
+        assert client.timeout is not None
 
 
 # ── 2.1: Async route uses thread pool ──
@@ -142,3 +143,35 @@ class TestAsyncRoute:
         import inspect
         from app.api.routes import query
         assert inspect.iscoroutinefunction(query)
+
+
+# ── Model configuration ──
+
+class TestModelConfig:
+    def test_anthropic_model_setting_exists(self):
+        """Settings should have an anthropic_model field with a default."""
+        from app.config import settings
+        assert hasattr(settings, "anthropic_model")
+        assert len(settings.anthropic_model) > 0
+
+    def test_anthropic_model_default_is_haiku(self):
+        """Default model should be Haiku for fast responses."""
+        from app.config import settings
+        assert "haiku" in settings.anthropic_model.lower()
+
+    def test_llm_provider_setting_exists(self):
+        """Settings should have llm_provider field."""
+        from app.config import settings
+        assert hasattr(settings, "llm_provider")
+        assert settings.llm_provider in ("gemini", "anthropic")
+
+    def test_gemini_model_setting_exists(self):
+        """Settings should have a gemini_model field."""
+        from app.config import settings
+        assert hasattr(settings, "gemini_model")
+        assert "gemini" in settings.gemini_model.lower()
+
+    def test_default_provider_is_gemini(self):
+        """Default provider should be gemini for fast responses."""
+        from app.config import settings
+        assert settings.llm_provider == "gemini"

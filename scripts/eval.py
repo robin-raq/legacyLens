@@ -185,9 +185,9 @@ EVAL_CASES = [
 # ── HTTP helper ──
 
 
-def post_chat(base_url: str, query: str, timeout: float = 120.0) -> dict:
-    """POST to /api/chat and return the parsed JSON response."""
-    url = f"{base_url}/api/chat"
+def post_query(base_url: str, query: str, timeout: float = 120.0) -> dict:
+    """POST to /api/query and return the parsed JSON response."""
+    url = f"{base_url}/api/query"
     data = json.dumps({"query": query}).encode("utf-8")
     req = urllib.request.Request(
         url, data=data, headers={"Content-Type": "application/json"}
@@ -263,7 +263,7 @@ def evaluate_single(
     print(f"    Query: {query}")
 
     start = time.time()
-    response = post_chat(base_url, query)
+    response = post_query(base_url, query)
     wall_ms = (time.time() - start) * 1000
 
     # Handle errors
@@ -327,6 +327,9 @@ def run_eval(
     print(f"\n  Running {total} evaluation queries...")
 
     for i, case in enumerate(EVAL_CASES, 1):
+        # Small delay between queries to avoid API rate limiting
+        if i > 1:
+            time.sleep(2)
         result = evaluate_single(base_url, case, i, total)
 
         # Apply pass/fail thresholds

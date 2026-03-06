@@ -7,7 +7,9 @@ Uses OrderedDict for O(1) LRU eviction.
 from collections import OrderedDict
 import threading
 
-CACHE_MAX_SIZE = 256
+from app.config import settings
+
+CACHE_MAX_SIZE = settings.embedding_cache_size
 
 _lock = threading.Lock()
 _cache: OrderedDict[str, list[float]] = OrderedDict()
