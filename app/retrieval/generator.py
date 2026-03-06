@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Iterator
+from typing import Callable, Iterator
 
 from app.config import settings
 from app.retrieval.query_classifier import QueryType, get_search_params
@@ -160,28 +160,50 @@ def _generate_gemini(system_prompt: str, user_message: str) -> str:
     return retry_on_rate_limit(_call, exc_type=ClientError, exc_match="429")
 
 
+def _stream_with_retry(
+    stream_factory: Callable[[], Iterator[str]],
+    exc_type: type[Exception],
+    exc_match: str | None = None,
+) -> Iterator[str]:
+    """Retry wrapper for streaming generators.
+
+    ``retry_on_rate_limit`` can't wrap generators because ``yield from``
+    inside a ``try`` block has special PEP 479 semantics.  This helper
+    accepts a *factory* that produces a fresh iterator on each attempt.
+    """
+    for attempt in range(_MAX_RETRIES):
+        try:
+            yield from stream_factory()
+            return  # Success — full stream consumed
+        except exc_type as e:
+            if exc_match and exc_match not in str(e):
+                raise
+            if attempt < _MAX_RETRIES - 1:
+                wait = _RETRY_DELAY * (attempt + 1)
+                logger.warning(
+                    "Stream rate limit, retrying in %.1fs (attempt %d/%d)",
+                    wait, attempt + 1, _MAX_RETRIES,
+                )
+                time.sleep(wait)
+                continue
+            raise
+
+
 def _stream_anthropic(system_prompt: str, user_message: str) -> Iterator[str]:
     """Stream answer via Anthropic Claude with retry on rate limits."""
     import anthropic
     client = _get_anthropic_client()
 
-    for attempt in range(_MAX_RETRIES):
-        try:
-            with client.messages.stream(
-                model=settings.anthropic_model,
-                max_tokens=settings.max_tokens,
-                system=system_prompt,
-                messages=[{"role": "user", "content": user_message}],
-            ) as stream:
-                yield from stream.text_stream
-            return  # Success
-        except anthropic.RateLimitError:
-            if attempt < _MAX_RETRIES - 1:
-                delay = _RETRY_DELAY * (attempt + 1)
-                logger.warning("Anthropic stream rate limit, retrying in %.1fs", delay)
-                time.sleep(delay)
-                continue
-            raise
+    def _stream():
+        with client.messages.stream(
+            model=settings.anthropic_model,
+            max_tokens=settings.max_tokens,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_message}],
+        ) as stream:
+            yield from stream.text_stream
+
+    yield from _stream_with_retry(_stream, exc_type=anthropic.RateLimitError)
 
 
 def _stream_gemini(system_prompt: str, user_message: str) -> Iterator[str]:
@@ -190,26 +212,21 @@ def _stream_gemini(system_prompt: str, user_message: str) -> Iterator[str]:
     from google.genai.errors import ClientError
     client = _get_gemini_client()
 
-    for attempt in range(_MAX_RETRIES):
-        try:
-            response = client.models.generate_content_stream(
-                model=settings.gemini_model,
-                contents=user_message,
-                config=types.GenerateContentConfig(
-                    system_instruction=system_prompt,
-                    max_output_tokens=settings.max_tokens,
-                    thinking_config=types.ThinkingConfig(thinking_budget=0),
-                ),
-            )
-            for chunk in response:
-                if chunk.text:
-                    yield chunk.text
-            return  # Success
-        except ClientError as e:
-            if "429" in str(e) and attempt < _MAX_RETRIES - 1:
-                time.sleep(_RETRY_DELAY * (attempt + 1))
-                continue
-            raise
+    def _stream():
+        response = client.models.generate_content_stream(
+            model=settings.gemini_model,
+            contents=user_message,
+            config=types.GenerateContentConfig(
+                system_instruction=system_prompt,
+                max_output_tokens=settings.max_tokens,
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
+            ),
+        )
+        for chunk in response:
+            if chunk.text:
+                yield chunk.text
+
+    yield from _stream_with_retry(_stream, exc_type=ClientError, exc_match="429")
 
 
 # ── Public API ──
