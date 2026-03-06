@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     embedding_dimensions: int = 1536
     embedding_timeout: float = 30.0
     embedding_batch_size: int = 100
+    embedding_cache_size: int = 256
 
     # Search tuning
     score_threshold: float = 0.2
