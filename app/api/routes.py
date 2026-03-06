@@ -25,7 +25,7 @@ def format_sse_event(event: str, data: dict | str) -> str:
 
     SSE spec: each event is `event: <type>\\ndata: <json>\\n\\n`
     """
-    payload = json.dumps(data) if isinstance(data, dict) else json.dumps(data)
+    payload = json.dumps(data)
     return f"event: {event}\ndata: {payload}\n\n"
 
 
@@ -75,7 +75,6 @@ async def query(
                 context = build_context(results)
                 answer = await asyncio.to_thread(
                     generate_answer, request.query, context, query_type,
-                    history=history,
                 )
 
             total_ms = (time.time() - start) * 1000
@@ -118,7 +117,7 @@ async def query(
         try:
             if context:
                 gen = generate_answer_stream(
-                    request.query, context, query_type, history=history
+                    request.query, context, query_type,
                 )
                 # Run the blocking generator in a thread, yielding chunks.
                 # NOTE: We use a sentinel instead of catching StopIteration

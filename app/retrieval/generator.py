@@ -8,6 +8,7 @@ from typing import Iterator
 
 from app.config import settings
 from app.retrieval.query_classifier import QueryType, get_search_params
+from app.utils import retry_on_rate_limit
 
 logger = logging.getLogger(__name__)
 
@@ -124,50 +125,39 @@ _RETRY_DELAY = settings.retry_delay
 def _generate_anthropic(system_prompt: str, user_message: str) -> str:
     """Generate answer via Anthropic Claude with retry on rate limits."""
     import anthropic
-    client = _get_anthropic_client()
 
-    for attempt in range(_MAX_RETRIES):
-        try:
-            response = client.messages.create(
-                model=settings.anthropic_model,
-                max_tokens=settings.max_tokens,
-                system=system_prompt,
-                messages=[{"role": "user", "content": user_message}],
-            )
-            return response.content[0].text
-        except anthropic.RateLimitError:
-            if attempt < _MAX_RETRIES - 1:
-                delay = _RETRY_DELAY * (attempt + 1)
-                logger.warning("Anthropic rate limit, retrying in %.1fs (attempt %d/%d)",
-                               delay, attempt + 1, _MAX_RETRIES)
-                time.sleep(delay)
-                continue
-            raise
+    def _call():
+        client = _get_anthropic_client()
+        response = client.messages.create(
+            model=settings.anthropic_model,
+            max_tokens=settings.max_tokens,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_message}],
+        )
+        return response.content[0].text
+
+    return retry_on_rate_limit(_call, exc_type=anthropic.RateLimitError)
 
 
 def _generate_gemini(system_prompt: str, user_message: str) -> str:
     """Generate answer via Google Gemini, with retry on rate-limit errors."""
-    client = _get_gemini_client()
     from google.genai import types
     from google.genai.errors import ClientError
 
-    for attempt in range(_MAX_RETRIES):
-        try:
-            response = client.models.generate_content(
-                model=settings.gemini_model,
-                contents=user_message,
-                config=types.GenerateContentConfig(
-                    system_instruction=system_prompt,
-                    max_output_tokens=settings.max_tokens,
-                    thinking_config=types.ThinkingConfig(thinking_budget=0),
-                ),
-            )
-            return response.text
-        except ClientError as e:
-            if "429" in str(e) and attempt < _MAX_RETRIES - 1:
-                time.sleep(_RETRY_DELAY * (attempt + 1))
-                continue
-            raise
+    def _call():
+        client = _get_gemini_client()
+        response = client.models.generate_content(
+            model=settings.gemini_model,
+            contents=user_message,
+            config=types.GenerateContentConfig(
+                system_instruction=system_prompt,
+                max_output_tokens=settings.max_tokens,
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
+            ),
+        )
+        return response.text
+
+    return retry_on_rate_limit(_call, exc_type=ClientError, exc_match="429")
 
 
 def _stream_anthropic(system_prompt: str, user_message: str) -> Iterator[str]:
@@ -196,9 +186,9 @@ def _stream_anthropic(system_prompt: str, user_message: str) -> Iterator[str]:
 
 def _stream_gemini(system_prompt: str, user_message: str) -> Iterator[str]:
     """Stream answer via Google Gemini, with retry on rate-limit errors."""
-    client = _get_gemini_client()
     from google.genai import types
     from google.genai.errors import ClientError
+    client = _get_gemini_client()
 
     for attempt in range(_MAX_RETRIES):
         try:
@@ -236,7 +226,6 @@ def _build_prompt(query: str, context: str, query_type: QueryType) -> tuple[str,
 
 def generate_answer(
     query: str, context: str, query_type: QueryType = QueryType.EXPLAIN,
-    history: list[dict] | None = None,
 ) -> str:
     """Generate an answer using the configured LLM provider.
 
@@ -255,7 +244,6 @@ def generate_answer(
 
 def generate_answer_stream(
     query: str, context: str, query_type: QueryType = QueryType.EXPLAIN,
-    history: list[dict] | None = None,
 ) -> Iterator[str]:
     """Stream an answer using the configured LLM provider.
 
