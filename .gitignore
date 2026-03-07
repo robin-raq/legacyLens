@@ -29,3 +29,4 @@ scripts/.perf_results/
 scripts/perf_compare.py
 scripts/perf_test.py
 AUDIT_REPORT.md
+demo-video-final.md
