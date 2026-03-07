@@ -746,7 +746,7 @@
                 headerHtml += '<span class="source-lines">L' + m.start_line + '-' + m.end_line + '</span>';
                 if (m.subroutine_name) headerHtml += '<span class="source-name">' + esc(m.subroutine_name) + '</span>';
                 if (m.blas_level !== 'unknown') headerHtml += '<span class="source-level">LVL.' + esc(m.blas_level) + '</span>';
-                headerHtml += '<span class="score-badge ' + scoreClass + '">' + scoreLabel + '</span>';
+                headerHtml += '<span class="score-badge ' + scoreClass + '">' + scoreLabel + ' (' + s.score.toFixed(3) + ')</span>';
                 headerHtml += '</div>';
 
                 var codeHtml = '<div class="source-code ' + (isLong ? '' : 'expanded') + '" id="' + id + '">';
@@ -757,6 +757,7 @@
                 var actionsHtml = '<div class="source-actions">';
                 if (isLong) actionsHtml += '<button class="action-btn" onclick="toggleExpand(\'' + id + '\', this)">[MORE]</button>';
                 actionsHtml += '<button class="action-btn copy-btn">[COPY]</button>';
+                actionsHtml += '<button class="action-btn view-file-btn">[VIEW FILE]</button>';
                 actionsHtml += '</div>';
 
                 card.innerHTML = headerHtml + codeHtml + actionsHtml;
@@ -765,6 +766,11 @@
                 copyBtn.addEventListener('click', (function(text) {
                     return function() { copyCode(this, text); };
                 })(codeText));
+                // Attach view-file handler
+                var viewBtn = card.querySelector('.view-file-btn');
+                viewBtn.addEventListener('click', (function(filePath, codeEl) {
+                    return function() { viewFullFile(this, filePath, codeEl); };
+                })(m.file_path, id));
                 target.appendChild(card);
             });
         }
@@ -954,6 +960,48 @@
                     button.style.textShadow = '';
                 }, 1200);
             });
+        }
+
+        async function viewFullFile(button, filePath, codeElId) {
+            var codeEl = document.getElementById(codeElId);
+            if (!codeEl) return;
+
+            // Toggle back to chunk view if already showing full file
+            if (button.dataset.expanded === 'true') {
+                codeEl.querySelector('pre code').innerHTML = highlightFortran(esc(button.dataset.originalText));
+                codeEl.classList.remove('expanded');
+                var fade = codeEl.querySelector('.code-fade');
+                if (fade) fade.style.display = '';
+                button.textContent = '[VIEW FILE]';
+                button.dataset.expanded = 'false';
+                return;
+            }
+
+            // Save original chunk text for toggling back
+            if (!button.dataset.originalText) {
+                button.dataset.originalText = codeEl.querySelector('pre code').textContent;
+            }
+
+            button.textContent = '[LOADING...]';
+            try {
+                var resp = await fetch('/api/source?file=' + encodeURIComponent(filePath));
+                if (!resp.ok) throw new Error('File not available');
+                var data = await resp.json();
+
+                codeEl.querySelector('pre code').innerHTML = highlightFortran(esc(data.content));
+                codeEl.classList.add('expanded');
+                var fade = codeEl.querySelector('.code-fade');
+                if (fade) fade.style.display = 'none';
+                button.textContent = '[CHUNK ONLY]';
+                button.dataset.expanded = 'true';
+            } catch (err) {
+                button.textContent = '[N/A]';
+                button.style.color = 'var(--amber)';
+                setTimeout(function() {
+                    button.textContent = '[VIEW FILE]';
+                    button.style.color = '';
+                }, 2000);
+            }
         }
 
         function esc(text) {

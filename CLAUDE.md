@@ -24,6 +24,11 @@ pytest
 # RAG evaluation (24 queries across 8 features — requires running server)
 python scripts/eval.py
 python scripts/eval.py --url https://legacylens-production-fd39.up.railway.app
+
+# Verify answers contain valid file/line references (requires running server)
+python scripts/verify_refs.py
+python scripts/verify_refs.py --url https://legacylens-production-fd39.up.railway.app
+python scripts/verify_refs.py --skip-disk  # no blas_src/ needed
 ```
 
 ## Required Environment Variables (.env)

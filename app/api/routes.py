@@ -4,6 +4,8 @@ import asyncio
 import json
 import logging
 import time
+from pathlib import Path
+
 from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse, StreamingResponse
 from app.models import QueryRequest, QueryResponse
@@ -16,10 +18,44 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+SOURCE_DIR = "blas_src"
+_FORTRAN_EXTENSIONS = {".f", ".f90", ".f95", ".for", ".fpp"}
+
 
 @router.get("/health")
 async def health():
     return {"status": "ok", "service": "legacylens"}
+
+
+@router.get("/source")
+async def get_source(file: str = Query(..., description="Relative path to a Fortran file")):
+    """Return the full content of a source file for drill-down context.
+
+    Only serves Fortran files from the blas_src/ directory.
+    Rejects path traversal attempts and non-Fortran extensions.
+    """
+    # Block path traversal
+    if ".." in file or file.startswith("/"):
+        return JSONResponse(status_code=400, content={"error": "Invalid file path"})
+
+    target = Path(SOURCE_DIR) / file
+
+    # Ensure resolved path stays within SOURCE_DIR
+    try:
+        target.resolve().relative_to(Path(SOURCE_DIR).resolve())
+    except ValueError:
+        return JSONResponse(status_code=400, content={"error": "Invalid file path"})
+
+    # Only serve Fortran files
+    if target.suffix.lower() not in _FORTRAN_EXTENSIONS:
+        return JSONResponse(status_code=400, content={"error": "Only Fortran source files are available"})
+
+    if not target.is_file():
+        return JSONResponse(status_code=404, content={"error": f"File not found: {file}"})
+
+    content = target.read_text(encoding="utf-8", errors="replace")
+    lines = content.splitlines()
+    return {"file": file, "content": content, "total_lines": len(lines)}
 
 
 def format_sse_event(event: str, data: dict | str) -> str:
