@@ -3,8 +3,13 @@
 import asyncio
 import json
 import logging
+import ssl
 import time
+import urllib.request
+import urllib.error
 from pathlib import Path
+
+import certifi
 
 from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -20,6 +25,23 @@ router = APIRouter()
 
 SOURCE_DIR = "blas_src"
 _FORTRAN_EXTENSIONS = {".f", ".f90", ".f95", ".for", ".fpp"}
+_GITHUB_RAW_BASE = "https://raw.githubusercontent.com/Reference-LAPACK/lapack/master/BLAS"
+
+
+def _fetch_from_github(file_path: str) -> str | None:
+    """Fetch a Fortran source file from the Reference-LAPACK GitHub repo.
+
+    Used as fallback when blas_src/ is not available (e.g. on Railway).
+    Maps file_path like 'SRC/dgemm.f' to the GitHub raw URL.
+    """
+    url = f"{_GITHUB_RAW_BASE}/{file_path}"
+    ssl_ctx = ssl.create_default_context(cafile=certifi.where())
+    try:
+        with urllib.request.urlopen(url, timeout=10, context=ssl_ctx) as resp:
+            return resp.read().decode("utf-8", errors="replace")
+    except (urllib.error.URLError, urllib.error.HTTPError, OSError) as e:
+        logger.debug("GitHub fallback failed for %s: %s", file_path, e)
+        return None
 
 
 @router.get("/health")
@@ -50,10 +72,14 @@ async def get_source(file: str = Query(..., description="Relative path to a Fort
     if target.suffix.lower() not in _FORTRAN_EXTENSIONS:
         return JSONResponse(status_code=400, content={"error": "Only Fortran source files are available"})
 
-    if not target.is_file():
-        return JSONResponse(status_code=404, content={"error": f"File not found: {file}"})
+    # Try local file first, fall back to GitHub if not on disk
+    if target.is_file():
+        content = target.read_text(encoding="utf-8", errors="replace")
+    else:
+        content = _fetch_from_github(file)
+        if content is None:
+            return JSONResponse(status_code=404, content={"error": f"File not found: {file}"})
 
-    content = target.read_text(encoding="utf-8", errors="replace")
     lines = content.splitlines()
     return {"file": file, "content": content, "total_lines": len(lines)}
 

@@ -3,7 +3,6 @@ __pycache__/
 *.pyc
 .env
 .DS_Store
-blas_src/
 *.pdf
 *.egg-info/
 dist/
