@@ -27,6 +27,24 @@ Pinecone was selected over ChromaDB, Qdrant, and pgvector for this project. Key 
 
 **Tradeoff accepted:** Not code-optimized. If retrieval precision were poor on pure code queries, Voyage Code 2 would be the upgrade path. In practice, 93% P@5 shows the header comments carry enough semantic signal.
 
+## LLM Selection
+
+**Choice: Google Gemini 2.5 Flash (default), with Anthropic Claude as fallback**
+
+| Criteria | Gemini 2.5 Flash | Claude Sonnet | Claude Haiku |
+|----------|-----------------|---------------|--------------|
+| Input cost/1M tokens | $0.15 | $3.00 | $0.25 |
+| Output cost/1M tokens | $0.60 | $15.00 | $1.25 |
+| Streaming | Yes (SSE) | Yes (SSE) | Yes (SSE) |
+| Code quality | Strong | Excellent | Good |
+| Est. cost per query | $0.0006 | $0.014 | $0.001 |
+
+**Why Gemini 2.5 Flash:** Best cost-to-quality ratio for this use case. At ~$0.06 per 100 queries, it's 23x cheaper than Claude Sonnet with comparable answer quality (96% term recall vs 97% on Claude Haiku). The MVP used Claude Sonnet; switching to Gemini cut LLM generation costs by ~95%.
+
+**Dual-provider architecture:** The generator supports both Gemini and Anthropic via a `llm_provider` config setting (default: `"gemini"`). Both providers implement identical interfaces for sync and streaming generation, with provider-specific retry logic (Gemini retries on `google.api_core` errors, Anthropic retries on `RateLimitError`). Switching providers requires only changing one environment variable.
+
+**Tradeoff accepted:** Gemini's answers are slightly less structured than Claude Sonnet's for complex multi-step explanations. For BLAS code (well-documented, single-function subroutines), the quality difference is negligible.
+
 ## Chunking Approach
 
 **Strategy: Subroutine-level splitting (primary) + fixed-size fallback**
